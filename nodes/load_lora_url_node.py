@@ -24,13 +24,13 @@ class LoadLoraByUrlOrPath:
         }
 
         for i in range(1, max_lora_num + 1):
-            inputs["optional"][f"lora_{i}_url"] = ("STRING", {"default": "", "multiline": True})
+            inputs["optional"][f"lora_{i}_url"] = ("STRING", {"default": "", "multiline": True, "show_if": {"num_loras": {"greater_or_equal": i}}})
             inputs["optional"][f"lora_{i}_strength"] = (
-                "FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01})
+                "FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01, "show_if": {"mode": "simple", "num_loras": {"greater_or_equal": i}}})
             inputs["optional"][f"lora_{i}_model_strength"] = (
-                "FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01})
+                "FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01, "show_if": {"mode": "advanced", "num_loras": {"greater_or_equal": i}}})
             inputs["optional"][f"lora_{i}_clip_strength"] = (
-                "FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01})
+                "FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01, "show_if": {"mode": "advanced", "num_loras": {"greater_or_equal": i}}})
 
         return inputs
 
