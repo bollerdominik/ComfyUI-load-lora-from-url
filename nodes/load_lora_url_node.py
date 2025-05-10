@@ -5,7 +5,7 @@ import hashlib
 import folder_paths
 
 
-# This node allows you to load LoRA files from URLs or local paths.
+# This ComfyUI node allows you to load LoRA files from URLs or local paths.
 # It downloads the files if they are not already present in the specified folder.
 # It also allows you to stack multiple LoRA files together with different strengths.
 class LoadLoraByUrlOrPath:
