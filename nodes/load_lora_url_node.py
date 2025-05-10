@@ -122,6 +122,6 @@ class LoadLoraByUrlOrPath:
                 loras.append((lora_name, model_strength, clip_strength))
 
         # Refresh the lora list to include newly downloaded files
-        folder_paths.get_filename_list("loras", force_reload=True)
+        folder_paths.get_filename_list("loras")
 
         return (loras,)
