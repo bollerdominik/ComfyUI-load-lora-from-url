@@ -1,73 +1,127 @@
-from PIL import Image, ImageSequence, ImageOps
-import torch
+import os
 import requests
 from io import BytesIO
-import os
-import numpy as np
-
-
-def pil2tensor(img):
-    output_images = []
-    output_masks = []
-    for i in ImageSequence.Iterator(img):
-        i = ImageOps.exif_transpose(i)
-        if i.mode == 'I':
-            i = i.point(lambda i: i * (1 / 255))
-        image = i.convert("RGB")
-        image = np.array(image).astype(np.float32) / 255.0
-        image = torch.from_numpy(image)[None,]
-        if 'A' in i.getbands():
-            mask = np.array(i.getchannel('A')).astype(np.float32) / 255.0
-            mask = 1. - torch.from_numpy(mask)
-        else:
-            mask = torch.zeros((64,64), dtype=torch.float32, device="cpu")
-        output_images.append(image)
-        output_masks.append(mask.unsqueeze(0))
-
-    if len(output_images) > 1:
-        output_image = torch.cat(output_images, dim=0)
-        output_mask = torch.cat(output_masks, dim=0)
-    else:
-        output_image = output_images[0]
-        output_mask = output_masks[0]
-
-    return (output_image, output_mask)
-
-
-def load_image(image_source):
-    if image_source.startswith('http'):
-        print(image_source)
-        response = requests.get(image_source)
-        img = Image.open(BytesIO(response.content))
-        file_name = image_source.split('/')[-1]
-    else:
-        img = Image.open(image_source)
-        file_name = os.path.basename(image_source)
-    return img, file_name
+import hashlib
+import folder_paths
 
 
 class LoadLoraByUrlOrPath:
+    def __init__(self):
+        pass
+
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
+    def INPUT_TYPES(s):
+        max_lora_num = 10
+        inputs = {
             "required": {
-                "url_or_path": ("STRING", {"multiline": True, "dynamicPrompts": False})
-            }
+                "toggle": ("BOOLEAN", {"label_on": "enabled", "label_off": "disabled"}),
+                "mode": (["simple", "advanced"],),
+                "num_loras": ("INT", {"default": 1, "min": 1, "max": max_lora_num}),
+            },
+            "optional": {
+                "optional_lora_stack": ("LORA_STACK",),
+            },
         }
 
+        for i in range(1, max_lora_num + 1):
+            inputs["optional"][f"lora_{i}_url"] = ("STRING", {"default": "", "multiline": True})
+            inputs["optional"][f"lora_{i}_strength"] = (
+                "FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01})
+            inputs["optional"][f"lora_{i}_model_strength"] = (
+                "FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01})
+            inputs["optional"][f"lora_{i}_clip_strength"] = (
+                "FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01})
 
-    RETURN_TYPES = ("IMAGE", "MASK")
-    FUNCTION = "load"
-    CATEGORY = "image"
+        return inputs
 
-    def load(self, url_or_path):
-        print(url_or_path)
-        img, name = load_image(url_or_path)
-        img_out, mask_out = pil2tensor(img)
-        return (img_out, mask_out)
+    RETURN_TYPES = ("LORA_STACK",)
+    RETURN_NAMES = ("lora_stack",)
+    FUNCTION = "load_and_stack"
 
+    CATEGORY = "EasyUse/Loaders"
 
-if __name__ == "__main__":
-    img, name = load_image("https://creativestorage.blob.core.chinacloudapi.cn/test/bird.png")
-    img_out, mask_out = pil2tensor(img)
+    def download_lora(self, url, lora_folder):
+        # Get filename from url or generate one from hash if no filename is present
+        try:
+            # Try to get the filename from the URL
+            if url.startswith('http'):
+                filename = os.path.basename(url.split('?')[0])
+                # If no extension or no filename, use hash
+                if not filename or '.' not in filename:
+                    filename = f"{hashlib.md5(url.encode()).hexdigest()}.safetensors"
+            else:
+                # Local path
+                filename = os.path.basename(url)
 
+            # Check if file already exists
+            full_path = os.path.join(lora_folder, filename)
+            if os.path.exists(full_path):
+                print(f"LoRA file {filename} already exists, skipping download")
+                return filename
+
+            # Download the file
+            if url.startswith('http'):
+                print(f"Downloading LoRA from {url}")
+                response = requests.get(url, stream=True)
+                response.raise_for_status()  # Raise an exception for HTTP errors
+
+                # Save the file
+                with open(full_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                print(f"Downloaded LoRA to {full_path}")
+                return filename
+            else:
+                # Copy local file if it's a valid path
+                if os.path.exists(url):
+                    import shutil
+                    shutil.copy2(url, full_path)
+                    print(f"Copied LoRA from {url} to {full_path}")
+                    return filename
+                else:
+                    print(f"Local LoRA file {url} does not exist")
+                    return None
+
+        except Exception as e:
+            print(f"Error downloading LoRA: {e}")
+            return None
+
+    def load_and_stack(self, toggle, mode, num_loras, optional_lora_stack=None, **kwargs):
+        if (toggle in [False, None, "False"]):
+            return (None,)
+
+        loras = []
+
+        # Import Stack values
+        if optional_lora_stack is not None:
+            loras.extend([l for l in optional_lora_stack if l[0] != "None"])
+
+        # Get the lora folder path
+        lora_folder = folder_paths.get_folder_paths("loras")[0]
+
+        # Process each LoRA
+        for i in range(1, num_loras + 1):
+            lora_url = kwargs.get(f"lora_{i}_url", "")
+
+            if not lora_url:
+                continue
+
+            # Download/copy the LoRA file
+            lora_name = self.download_lora(lora_url, lora_folder)
+
+            if not lora_name:
+                continue
+
+            # Add the LoRA to the stack
+            if mode == "simple":
+                lora_strength = float(kwargs.get(f"lora_{i}_strength", 1.0))
+                loras.append((lora_name, lora_strength, lora_strength))
+            elif mode == "advanced":
+                model_strength = float(kwargs.get(f"lora_{i}_model_strength", 1.0))
+                clip_strength = float(kwargs.get(f"lora_{i}_clip_strength", 1.0))
+                loras.append((lora_name, model_strength, clip_strength))
+
+        # Refresh the lora list to include newly downloaded files
+        folder_paths.get_filename_list("loras", force_reload=True)
+
+        return (loras,)
