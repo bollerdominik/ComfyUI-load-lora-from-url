@@ -100,6 +100,24 @@ class LoadLoraByUrlOrPath:
             print(f"Error deleting LoRA file: {e}")
             return False
 
+    def _validate_and_cleanup_file(self, file_path, filename):
+        """Check if file is valid (non-zero size) and delete if invalid"""
+        try:
+            file_size = os.path.getsize(file_path)
+            if file_size == 0:
+                print(f"Downloaded file {filename} is 0 bytes, deleting...")
+                os.remove(file_path)
+                return False
+            return True
+        except Exception as e:
+            print(f"Error validating file {filename}: {e}")
+            # Try to delete the file if there was an error checking it
+            try:
+                os.remove(file_path)
+            except:
+                pass
+            return False
+
     @classmethod
     def INPUT_TYPES(s):
         max_lora_num = 10
@@ -152,10 +170,14 @@ class LoadLoraByUrlOrPath:
             # Check if file already exists
             full_path = os.path.join(self.lora_folder, filename)
             if os.path.exists(full_path):
-                print(f"LoRA file {filename} already exists, skipping download")
-                # Update usage history for existing file
-                self._update_lora_usage(filename)
-                return filename
+                # Validate existing file before using it
+                if self._validate_and_cleanup_file(full_path, filename):
+                    print(f"LoRA file {filename} already exists, skipping download")
+                    # Update usage history for existing file
+                    self._update_lora_usage(filename)
+                    return filename
+                else:
+                    print(f"Existing LoRA file {filename} was invalid and removed, re-downloading...")
 
             # Check available disk space before downloading
             MIN_FREE_SPACE = 2 * 1024 * 1024 * 1024  # 2GB in bytes
@@ -194,6 +216,11 @@ class LoadLoraByUrlOrPath:
                         f.write(chunk)
                 print(f"Downloaded LoRA to {full_path}")
 
+                # Validate the downloaded file
+                if not self._validate_and_cleanup_file(full_path, filename):
+                    print(f"Downloaded LoRA file {filename} was invalid and removed")
+                    return None
+
                 # Update usage history for the new file
                 self._update_lora_usage(filename)
                 return filename
@@ -203,6 +230,11 @@ class LoadLoraByUrlOrPath:
                     import shutil
                     shutil.copy2(url, full_path)
                     print(f"Copied LoRA from {url} to {full_path}")
+
+                    # Validate the copied file
+                    if not self._validate_and_cleanup_file(full_path, filename):
+                        print(f"Copied LoRA file {filename} was invalid and removed")
+                        return None
 
                     # Update usage history for the new file
                     self._update_lora_usage(filename)
