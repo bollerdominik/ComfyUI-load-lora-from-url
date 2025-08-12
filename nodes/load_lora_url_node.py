@@ -124,12 +124,35 @@ class LoadLoraByUrlOrPath:
                       if os.path.isfile(os.path.join(self.lora_folder, f))
                       and not f.startswith('.')]
 
+        # If no files at all, nothing to delete
+        if not lora_files:
+            print("No LoRA files available for deletion")
+            return False
+
+        # For files not in history, add them with their file modification time
+        current_time = time.time()
+        for lora_file in lora_files:
+            if lora_file not in history:
+                try:
+                    file_path = os.path.join(self.lora_folder, lora_file)
+                    # Use file modification time, or current time - 1 day as fallback
+                    mod_time = os.path.getmtime(file_path)
+                    history[lora_file] = mod_time
+                    print(f"Added {lora_file} to history with modification time")
+                except Exception as e:
+                    # If we can't get mod time, use a very old timestamp to prioritize for deletion
+                    history[lora_file] = current_time - (365 * 24 * 3600)  # 1 year ago
+                    print(f"Added {lora_file} to history with fallback timestamp: {e}")
+
+        # Save the updated history
+        self._save_history(history)
+
         # Filter history to only include existing files
         valid_history = {k: v for k, v in history.items() if k in lora_files}
 
-        # If no history or no files, nothing to delete
-        if not valid_history or not lora_files:
-            print("No LoRA files available for deletion")
+        # Now we should have valid history for all existing files
+        if not valid_history:
+            print("No LoRA files available for deletion after history update")
             return False
 
         # Find least recently used LoRA
