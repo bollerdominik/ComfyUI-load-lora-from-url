@@ -117,12 +117,17 @@ class LoadLoraByUrlOrPath:
 
     def _delete_least_recently_used_lora(self):
         """Delete the least recently used LoRA file to free up space"""
+        print("Starting LoRA cleanup process...")
+
         history = self._load_history()
+        print(f"Loaded history with {len(history)} entries")
 
         # Get all existing LoRA files (excluding hidden files and the history file)
         lora_files = [f for f in os.listdir(self.lora_folder)
                       if os.path.isfile(os.path.join(self.lora_folder, f))
                       and not f.startswith('.')]
+
+        print(f"Found {len(lora_files)} LoRA files in folder")
 
         # If no files at all, nothing to delete
         if not lora_files:
@@ -131,28 +136,41 @@ class LoadLoraByUrlOrPath:
 
         # For files not in history, add them with their file modification time
         current_time = time.time()
+        files_added_to_history = 0
+
         for lora_file in lora_files:
             if lora_file not in history:
                 try:
                     file_path = os.path.join(self.lora_folder, lora_file)
-                    # Use file modification time, or current time - 1 day as fallback
+                    # Use file modification time
                     mod_time = os.path.getmtime(file_path)
                     history[lora_file] = mod_time
-                    print(f"Added {lora_file} to history with modification time")
+                    files_added_to_history += 1
+                    # Only print for first few files to avoid log spam
+                    if files_added_to_history <= 5:
+                        print(f"Added {lora_file} to history with modification time")
+                    elif files_added_to_history == 6:
+                        print("... (continuing to add more files to history)")
                 except Exception as e:
                     # If we can't get mod time, use a very old timestamp to prioritize for deletion
                     history[lora_file] = current_time - (365 * 24 * 3600)  # 1 year ago
+                    files_added_to_history += 1
                     print(f"Added {lora_file} to history with fallback timestamp: {e}")
 
-        # Save the updated history
-        self._save_history(history)
+        # Save the updated history if files were added
+        if files_added_to_history > 0:
+            self._save_history(history)
+            print(f"Added {files_added_to_history} files to history and saved")
 
-        # Filter history to only include existing files
+        # Now ALL existing files should be in history
+        # Filter history to only include existing files (in case history has stale entries)
         valid_history = {k: v for k, v in history.items() if k in lora_files}
+
+        print(f"Valid history entries: {len(valid_history)}")
 
         # Now we should have valid history for all existing files
         if not valid_history:
-            print("No LoRA files available for deletion after history update")
+            print("ERROR: No valid history entries found after update")
             return False
 
         # Find least recently used LoRA
@@ -161,21 +179,40 @@ class LoadLoraByUrlOrPath:
         last_used_time = time.strftime('%Y-%m-%d %H:%M:%S',
                                        time.localtime(least_recent_lora[1]))
 
+        print(f"Selected for deletion: {least_recent_file} (last used: {last_used_time})")
+
         # Delete the file
         try:
             lora_path = os.path.join(self.lora_folder, least_recent_file)
+
+            # Check if file exists before trying to delete
+            if not os.path.exists(lora_path):
+                print(f"File {least_recent_file} no longer exists, removing from history")
+                history.pop(least_recent_file, None)
+                self._save_history(history)
+                return False
+
             file_size = os.path.getsize(lora_path) / (1024 * 1024)  # Size in MB
+            print(f"Deleting file: {lora_path} ({file_size:.2f} MB)")
 
             os.remove(lora_path)
-            print(f"Deleted least recently used LoRA: {least_recent_file} "
+            print(f"Successfully deleted LoRA: {least_recent_file} "
                   f"({file_size:.2f} MB, last used: {last_used_time})")
 
             # Update history by removing the deleted file
-            history.pop(least_recent_file)
+            history.pop(least_recent_file, None)
             self._save_history(history)
-            return True
+
+            # Verify file was actually deleted
+            if os.path.exists(lora_path):
+                print(f"ERROR: File {least_recent_file} still exists after deletion attempt!")
+                return False
+            else:
+                print(f"Confirmed: File {least_recent_file} has been deleted")
+                return True
+
         except Exception as e:
-            print(f"Error deleting LoRA file: {e}")
+            print(f"ERROR deleting LoRA file {least_recent_file}: {e}")
             return False
 
     def _validate_and_cleanup_file(self, file_path, filename):
@@ -283,23 +320,20 @@ class LoadLoraByUrlOrPath:
             # If space is low based on either check, try to free up space
             if need_cleanup:
                 print(cleanup_reason)
+                print("Starting cleanup process...")
 
                 # Try to delete least recently used LoRAs until enough space is freed
                 cleanup_attempts = 0
                 max_cleanup_attempts = 10  # Prevent infinite loops
 
-                while (
-                        free_space < MIN_FREE_SPACE or current_volume_size > self.VOLUME_CLEANUP_THRESHOLD) and cleanup_attempts < max_cleanup_attempts:
-                    deleted = self._delete_least_recently_used_lora()
-                    if not deleted:
-                        print("Could not free up enough space for new LoRA download")
-                        return None
-
-                    cleanup_attempts += 1
-
-                    # Recheck space after deletion
+                while cleanup_attempts < max_cleanup_attempts:
+                    # Check current space before attempting cleanup
                     free_space = self._check_disk_space()
                     current_volume_size, _ = self._check_volume_size()
+
+                    print(f"Cleanup attempt {cleanup_attempts + 1}:")
+                    print(f"  Current free space: {free_space / (1024 ** 3):.2f}GB")
+                    print(f"  Current volume size: {current_volume_size / (1024 ** 3):.2f}GB")
 
                     # Check if we've freed enough space
                     space_ok = (free_space >= MIN_FREE_SPACE or free_space == 0)  # free_space == 0 means check failed
@@ -307,8 +341,37 @@ class LoadLoraByUrlOrPath:
 
                     if space_ok and volume_ok:
                         print(
-                            f"Freed up space. Disk: {free_space / (1024 ** 3):.2f}GB available, Volume: {current_volume_size / (1024 ** 3):.2f}GB used")
+                            f"Cleanup complete! Disk: {free_space / (1024 ** 3):.2f}GB available, Volume: {current_volume_size / (1024 ** 3):.2f}GB used")
                         break
+
+                    # Try to delete one file
+                    deleted = self._delete_least_recently_used_lora()
+
+                    if not deleted:
+                        print(f"Could not delete any files on attempt {cleanup_attempts + 1}")
+                        if cleanup_attempts == 0:
+                            print("No files were deleted - this might be a permissions issue or all files are in use")
+                        break
+
+                    cleanup_attempts += 1
+                    print(f"Cleanup attempt {cleanup_attempts} completed, checking space again...")
+
+                # Final check after cleanup attempts
+                if cleanup_attempts >= max_cleanup_attempts:
+                    print(f"Reached maximum cleanup attempts ({max_cleanup_attempts}), stopping cleanup")
+
+                final_free_space = self._check_disk_space()
+                final_volume_size, _ = self._check_volume_size()
+                final_space_ok = (final_free_space >= MIN_FREE_SPACE or final_free_space == 0)
+                final_volume_ok = final_volume_size <= self.VOLUME_CLEANUP_THRESHOLD
+
+                if not (final_space_ok and final_volume_ok):
+                    print("Could not free up enough space for new LoRA download")
+                    print(
+                        f"Final state - Free space: {final_free_space / (1024 ** 3):.2f}GB, Volume size: {final_volume_size / (1024 ** 3):.2f}GB")
+                    return None
+                else:
+                    print("Cleanup successful, proceeding with download")
 
             # Download the file
             if url.startswith('http'):
