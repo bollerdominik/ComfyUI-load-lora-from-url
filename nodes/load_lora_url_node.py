@@ -27,28 +27,109 @@ class LoadLoraByUrlOrPath:
 
     def _ensure_history_file(self):
         """Initialize the usage history file if it doesn't exist"""
-        history_path = self._get_history_path()
-        if not os.path.exists(history_path):
-            self._save_history({})
+        try:
+            history_path = self._get_history_path()
+            print(f"History file path: {history_path}")
+
+            if not os.path.exists(history_path):
+                print("History file does not exist, creating new one")
+                self._save_history({})
+            else:
+                # Test if we can read the existing file
+                try:
+                    with open(history_path, 'r') as f:
+                        test_data = json.load(f)
+                    print(f"History file exists and is readable with {len(test_data)} entries")
+                except Exception as e:
+                    print(f"History file exists but is corrupted: {e}, recreating")
+                    self._save_history({})
+        except Exception as e:
+            print(f"ERROR in _ensure_history_file: {e}")
 
     def _get_history_path(self):
         """Get the path to the usage history file"""
-        return os.path.join(self.lora_folder, ".lora_usage_history.json")
+        try:
+            history_path = os.path.join(self.lora_folder, ".lora_usage_history.json")
+            # Ensure the parent directory exists
+            os.makedirs(os.path.dirname(history_path), exist_ok=True)
+            return history_path
+        except Exception as e:
+            print(f"ERROR getting history path: {e}")
+            # Fallback to a temporary location
+            return "/tmp/.lora_usage_history.json"
 
     def _load_history(self):
         """Load the LoRA usage history from file"""
         history_path = self._get_history_path()
         try:
+            if not os.path.exists(history_path):
+                print(f"History file {history_path} does not exist, returning empty history")
+                return {}
+
             with open(history_path, 'r') as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
+                history = json.load(f)
+
+            # Validate that it's a dictionary
+            if not isinstance(history, dict):
+                print("History file contains invalid data, returning empty history")
+                return {}
+
+            print(f"Successfully loaded history with {len(history)} entries from {history_path}")
+            return history
+
+        except json.JSONDecodeError as e:
+            print(f"History file is corrupted (JSON error): {e}, returning empty history")
+            return {}
+        except Exception as e:
+            print(f"ERROR loading history: {e}, returning empty history")
             return {}
 
     def _save_history(self, history):
         """Save the LoRA usage history to file"""
         history_path = self._get_history_path()
-        with open(history_path, 'w') as f:
-            json.dump(history, f)
+        try:
+            # Validate input
+            if not isinstance(history, dict):
+                print(f"ERROR: Cannot save non-dict history: {type(history)}")
+                return False
+
+            # Create backup of existing file
+            if os.path.exists(history_path):
+                backup_path = history_path + ".backup"
+                try:
+                    import shutil
+                    shutil.copy2(history_path, backup_path)
+                except Exception as e:
+                    print(f"Could not create backup: {e}")
+
+            # Write new history
+            with open(history_path, 'w') as f:
+                json.dump(history, f, indent=2)
+
+            # Verify the file was written correctly
+            with open(history_path, 'r') as f:
+                test_load = json.load(f)
+
+            if len(test_load) != len(history):
+                raise Exception(f"History verification failed: expected {len(history)} entries, got {len(test_load)}")
+
+            print(f"Successfully saved history with {len(history)} entries to {history_path}")
+            return True
+
+        except Exception as e:
+            print(f"ERROR saving history to {history_path}: {e}")
+
+            # Try to restore backup if it exists
+            backup_path = history_path + ".backup"
+            if os.path.exists(backup_path):
+                try:
+                    import shutil
+                    shutil.copy2(backup_path, history_path)
+                    print("Restored history from backup")
+                except Exception as backup_error:
+                    print(f"Could not restore backup: {backup_error}")
+
+            return False
 
     def _update_lora_usage(self, lora_name):
         """Update the last usage timestamp for a LoRA file"""
@@ -117,102 +198,125 @@ class LoadLoraByUrlOrPath:
 
     def _delete_least_recently_used_lora(self):
         """Delete the least recently used LoRA file to free up space"""
-        print("Starting LoRA cleanup process...")
+        try:
+            print("Starting LoRA cleanup process...")
 
-        history = self._load_history()
-        print(f"Loaded history with {len(history)} entries")
+            history = self._load_history()
+            print(f"Loaded history with {len(history)} entries")
 
-        # Get all existing LoRA files (excluding hidden files and the history file)
-        lora_files = [f for f in os.listdir(self.lora_folder)
-                      if os.path.isfile(os.path.join(self.lora_folder, f))
-                      and not f.startswith('.')]
+            # Get all existing LoRA files (excluding hidden files and the history file)
+            try:
+                lora_files = [f for f in os.listdir(self.lora_folder)
+                              if os.path.isfile(os.path.join(self.lora_folder, f))
+                              and not f.startswith('.')
+                              and f.endswith('.safetensors')]  # Only safetensors files
+            except Exception as e:
+                print(f"ERROR: Could not list LoRA folder contents: {e}")
+                return False
 
-        print(f"Found {len(lora_files)} LoRA files in folder")
+            print(f"Found {len(lora_files)} LoRA files in folder")
 
-        # If no files at all, nothing to delete
-        if not lora_files:
-            print("No LoRA files available for deletion")
-            return False
+            # If no files at all, nothing to delete
+            if not lora_files:
+                print("No LoRA files available for deletion")
+                return False
 
-        # For files not in history, add them with their file modification time
-        current_time = time.time()
-        files_added_to_history = 0
+            # For files not in history, add them with their file modification time
+            current_time = time.time()
+            files_added_to_history = 0
 
-        for lora_file in lora_files:
-            if lora_file not in history:
+            print("Adding missing files to history...")
+            for i, lora_file in enumerate(lora_files):
                 try:
-                    file_path = os.path.join(self.lora_folder, lora_file)
-                    # Use file modification time
-                    mod_time = os.path.getmtime(file_path)
-                    history[lora_file] = mod_time
-                    files_added_to_history += 1
-                    # Only print for first few files to avoid log spam
-                    if files_added_to_history <= 5:
-                        print(f"Added {lora_file} to history with modification time")
-                    elif files_added_to_history == 6:
-                        print("... (continuing to add more files to history)")
+                    if lora_file not in history:
+                        file_path = os.path.join(self.lora_folder, lora_file)
+                        # Use file modification time
+                        mod_time = os.path.getmtime(file_path)
+                        history[lora_file] = mod_time
+                        files_added_to_history += 1
+
+                        # Print progress every 20 files to avoid log spam
+                        if files_added_to_history % 20 == 0:
+                            print(f"Added {files_added_to_history} files to history so far...")
+
                 except Exception as e:
-                    # If we can't get mod time, use a very old timestamp to prioritize for deletion
+                    print(f"ERROR adding {lora_file} to history: {e}")
+                    # Use a very old timestamp to prioritize for deletion
                     history[lora_file] = current_time - (365 * 24 * 3600)  # 1 year ago
                     files_added_to_history += 1
-                    print(f"Added {lora_file} to history with fallback timestamp: {e}")
 
-        # Save the updated history if files were added
-        if files_added_to_history > 0:
-            self._save_history(history)
-            print(f"Added {files_added_to_history} files to history and saved")
+            print(f"Finished adding files to history. Added {files_added_to_history} new entries.")
 
-        # Now ALL existing files should be in history
-        # Filter history to only include existing files (in case history has stale entries)
-        valid_history = {k: v for k, v in history.items() if k in lora_files}
+            # Save the updated history if files were added
+            if files_added_to_history > 0:
+                try:
+                    self._save_history(history)
+                    print(f"Successfully saved history with {len(history)} total entries")
+                except Exception as e:
+                    print(f"ERROR saving history: {e}")
+                    return False
 
-        print(f"Valid history entries: {len(valid_history)}")
+            # Filter history to only include existing files
+            valid_history = {k: v for k, v in history.items() if k in lora_files}
+            print(f"Valid history entries: {len(valid_history)}")
 
-        # Now we should have valid history for all existing files
-        if not valid_history:
-            print("ERROR: No valid history entries found after update")
-            return False
+            if not valid_history:
+                print("ERROR: No valid history entries found")
+                return False
 
-        # Find least recently used LoRA
-        least_recent_lora = min(valid_history.items(), key=lambda x: x[1])
-        least_recent_file = least_recent_lora[0]
-        last_used_time = time.strftime('%Y-%m-%d %H:%M:%S',
-                                       time.localtime(least_recent_lora[1]))
+            # Find least recently used LoRA
+            try:
+                least_recent_lora = min(valid_history.items(), key=lambda x: x[1])
+                least_recent_file = least_recent_lora[0]
+                last_used_time = time.strftime('%Y-%m-%d %H:%M:%S',
+                                               time.localtime(least_recent_lora[1]))
 
-        print(f"Selected for deletion: {least_recent_file} (last used: {last_used_time})")
+                print(f"Selected for deletion: {least_recent_file} (last used: {last_used_time})")
+            except Exception as e:
+                print(f"ERROR finding least recent file: {e}")
+                return False
 
-        # Delete the file
-        try:
-            lora_path = os.path.join(self.lora_folder, least_recent_file)
+            # Delete the file
+            try:
+                lora_path = os.path.join(self.lora_folder, least_recent_file)
 
-            # Check if file exists before trying to delete
-            if not os.path.exists(lora_path):
-                print(f"File {least_recent_file} no longer exists, removing from history")
+                # Check if file exists before trying to delete
+                if not os.path.exists(lora_path):
+                    print(f"File {least_recent_file} no longer exists, removing from history")
+                    history.pop(least_recent_file, None)
+                    self._save_history(history)
+                    # Try again with remaining files
+                    return self._delete_least_recently_used_lora()
+
+                file_size = os.path.getsize(lora_path) / (1024 * 1024)  # Size in MB
+                print(f"Attempting to delete: {lora_path} ({file_size:.2f} MB)")
+
+                os.remove(lora_path)
+                print(f"Successfully deleted LoRA: {least_recent_file} ({file_size:.2f} MB)")
+
+                # Update history by removing the deleted file
                 history.pop(least_recent_file, None)
                 self._save_history(history)
+
+                # Verify file was actually deleted
+                if os.path.exists(lora_path):
+                    print(f"ERROR: File {least_recent_file} still exists after deletion attempt!")
+                    return False
+                else:
+                    print(f"Confirmed: File {least_recent_file} has been deleted successfully")
+                    return True
+
+            except PermissionError as e:
+                print(f"PERMISSION ERROR deleting {least_recent_file}: {e}")
                 return False
-
-            file_size = os.path.getsize(lora_path) / (1024 * 1024)  # Size in MB
-            print(f"Deleting file: {lora_path} ({file_size:.2f} MB)")
-
-            os.remove(lora_path)
-            print(f"Successfully deleted LoRA: {least_recent_file} "
-                  f"({file_size:.2f} MB, last used: {last_used_time})")
-
-            # Update history by removing the deleted file
-            history.pop(least_recent_file, None)
-            self._save_history(history)
-
-            # Verify file was actually deleted
-            if os.path.exists(lora_path):
-                print(f"ERROR: File {least_recent_file} still exists after deletion attempt!")
+            except Exception as e:
+                print(f"ERROR deleting LoRA file {least_recent_file}: {e}")
                 return False
-            else:
-                print(f"Confirmed: File {least_recent_file} has been deleted")
-                return True
 
         except Exception as e:
-            print(f"ERROR deleting LoRA file {least_recent_file}: {e}")
+            print(f"UNEXPECTED ERROR in _delete_least_recently_used_lora: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def _validate_and_cleanup_file(self, file_path, filename):
