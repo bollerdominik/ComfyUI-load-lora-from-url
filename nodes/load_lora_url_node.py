@@ -23,7 +23,7 @@ class LoadLoraByUrlOrPath:
         # Volume size limit in bytes (100GB = 100 * 1024^3)
         self.VOLUME_SIZE_LIMIT = 100 * 1024 * 1024 * 1024
         # Threshold before cleanup (93GB = 93 * 1024^3)
-        self.VOLUME_CLEANUP_THRESHOLD = 93 * 1024 * 1024 * 1024
+        self.VOLUME_CLEANUP_THRESHOLD = 90 * 1024 * 1024 * 1024
 
     def _ensure_history_file(self):
         """Initialize the usage history file if it doesn't exist"""
