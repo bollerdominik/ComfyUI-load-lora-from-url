@@ -20,6 +20,11 @@ class LoadLoraByUrlOrPath:
         # Ensure history file exists
         self._ensure_history_file()
 
+        # Volume size limit in bytes (100GB = 100 * 1024^3)
+        self.VOLUME_SIZE_LIMIT = 100 * 1024 * 1024 * 1024
+        # Threshold before cleanup (93GB = 93 * 1024^3)
+        self.VOLUME_CLEANUP_THRESHOLD = 93 * 1024 * 1024 * 1024
+
     def _ensure_history_file(self):
         """Initialize the usage history file if it doesn't exist"""
         history_path = self._get_history_path()
@@ -51,6 +56,40 @@ class LoadLoraByUrlOrPath:
         history[lora_name] = time.time()
         self._save_history(history)
 
+    def _get_volume_root(self):
+        """Detect the mounted volume root path"""
+        # Try to find the network-volume path by going up from lora_folder
+        current_path = os.path.abspath(self.lora_folder)
+
+        # Look for common mounted volume patterns
+        volume_indicators = ['network-volume', 'workspace']
+
+        while current_path != '/':
+            folder_name = os.path.basename(current_path)
+            if any(indicator in folder_name for indicator in volume_indicators):
+                return current_path
+            current_path = os.path.dirname(current_path)
+
+        # If no specific volume found, use the lora folder itself
+        return self.lora_folder
+
+    def _calculate_folder_size(self, folder_path):
+        """Calculate total size of a folder and all its contents"""
+        try:
+            total_size = 0
+            for dirpath, dirnames, filenames in os.walk(folder_path):
+                for filename in filenames:
+                    file_path = os.path.join(dirpath, filename)
+                    try:
+                        total_size += os.path.getsize(file_path)
+                    except (OSError, IOError):
+                        # Skip files that can't be accessed
+                        continue
+            return total_size
+        except Exception as e:
+            print(f"Error calculating folder size for {folder_path}: {e}")
+            return 0
+
     def _check_disk_space(self):
         """Check available disk space in the LoRA folder"""
         try:
@@ -59,6 +98,22 @@ class LoadLoraByUrlOrPath:
         except Exception as e:
             print(f"Error checking disk space: {e}")
             return 0
+
+    def _check_volume_size(self):
+        """Check the actual volume usage for mounted filesystems"""
+        try:
+            volume_root = self._get_volume_root()
+            current_size = self._calculate_folder_size(volume_root)
+
+            print(f"Volume root: {volume_root}")
+            print(f"Current volume usage: {current_size / (1024 ** 3):.2f}GB")
+            print(f"Volume limit: {self.VOLUME_SIZE_LIMIT / (1024 ** 3):.2f}GB")
+            print(f"Cleanup threshold: {self.VOLUME_CLEANUP_THRESHOLD / (1024 ** 3):.2f}GB")
+
+            return current_size, volume_root
+        except Exception as e:
+            print(f"Error checking volume size: {e}")
+            return 0, self.lora_folder
 
     def _delete_least_recently_used_lora(self):
         """Delete the least recently used LoRA file to free up space"""
@@ -179,24 +234,57 @@ class LoadLoraByUrlOrPath:
                 else:
                     print(f"Existing LoRA file {filename} was invalid and removed, re-downloading...")
 
-            # Check available disk space before downloading
+            # Check available disk space before downloading (original method)
             MIN_FREE_SPACE = 2 * 1024 * 1024 * 1024  # 2GB in bytes
             free_space = self._check_disk_space()
 
-            # If space is less than 2GB, try to free up space
-            if free_space < MIN_FREE_SPACE:
-                print(f"Low disk space: {free_space / (1024 * 1024 * 1024):.2f}GB available. Need at least 2GB.")
+            # Check volume size (new method for mounted filesystems)
+            current_volume_size, volume_root = self._check_volume_size()
+
+            # Determine if we need to free up space based on either check
+            need_cleanup = False
+            cleanup_reason = ""
+
+            # Check traditional disk space
+            if free_space < MIN_FREE_SPACE and free_space > 0:  # free_space > 0 means the check worked
+                need_cleanup = True
+                cleanup_reason = f"Low disk space: {free_space / (1024 ** 3):.2f}GB available. Need at least 2GB."
+
+            # Check volume size (for mounted filesystems)
+            if current_volume_size > self.VOLUME_CLEANUP_THRESHOLD:
+                need_cleanup = True
+                if cleanup_reason:
+                    cleanup_reason += f" Also, "
+                cleanup_reason += f"Volume size ({current_volume_size / (1024 ** 3):.2f}GB) exceeds threshold ({self.VOLUME_CLEANUP_THRESHOLD / (1024 ** 3):.2f}GB)."
+
+            # If space is low based on either check, try to free up space
+            if need_cleanup:
+                print(cleanup_reason)
 
                 # Try to delete least recently used LoRAs until enough space is freed
-                while free_space < MIN_FREE_SPACE:
+                cleanup_attempts = 0
+                max_cleanup_attempts = 10  # Prevent infinite loops
+
+                while (
+                        free_space < MIN_FREE_SPACE or current_volume_size > self.VOLUME_CLEANUP_THRESHOLD) and cleanup_attempts < max_cleanup_attempts:
                     deleted = self._delete_least_recently_used_lora()
                     if not deleted:
                         print("Could not free up enough space for new LoRA download")
                         return None
+
+                    cleanup_attempts += 1
+
                     # Recheck space after deletion
                     free_space = self._check_disk_space()
-                    if free_space >= MIN_FREE_SPACE:
-                        print(f"Freed up space. Now {free_space / (1024 * 1024 * 1024):.2f}GB available")
+                    current_volume_size, _ = self._check_volume_size()
+
+                    # Check if we've freed enough space
+                    space_ok = (free_space >= MIN_FREE_SPACE or free_space == 0)  # free_space == 0 means check failed
+                    volume_ok = current_volume_size <= self.VOLUME_CLEANUP_THRESHOLD
+
+                    if space_ok and volume_ok:
+                        print(
+                            f"Freed up space. Disk: {free_space / (1024 ** 3):.2f}GB available, Volume: {current_volume_size / (1024 ** 3):.2f}GB used")
                         break
 
             # Download the file
@@ -207,7 +295,7 @@ class LoadLoraByUrlOrPath:
 
                 # Get file size from headers if available
                 file_size = int(response.headers.get('content-length', 0)) / (
-                            1024 * 1024) if 'content-length' in response.headers else "unknown"
+                        1024 * 1024) if 'content-length' in response.headers else "unknown"
                 print(f"File size: {file_size} MB" if isinstance(file_size, (int, float)) else "File size: unknown")
 
                 # Save the file
