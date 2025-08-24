@@ -508,7 +508,7 @@ class LoadVideoLoraByUrlOrPathSelect:
                     "blocks": {},
                     "layer_filter": "",
                     "low_mem_load": False,
-                    "merge_loras": True,
+                    "merge_loras": False,
                 })
             else:
                 print(f"Failed to download or locate LoRA from {lora_url}, skipping.")
