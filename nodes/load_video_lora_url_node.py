@@ -284,3 +284,234 @@ class LoadVideoLoraByUrlOrPath:
         # folder_paths.refresh_custom_paths("loras") # More thorough but might be overkill
 
         return (current_model, current_clip)
+
+
+class LoadVideoLoraByUrlOrPathSelect:
+    def __init__(self):
+        self.lora_folder = folder_paths.get_folder_paths("loras")[0]
+        self._ensure_history_file()
+
+    def _ensure_history_file(self):
+        history_path = self._get_history_path()
+        if not os.path.exists(history_path):
+            self._save_history({})
+
+    def _get_history_path(self):
+        return os.path.join(self.lora_folder, ".lora_usage_history.json")
+
+    def _load_history(self):
+        history_path = self._get_history_path()
+        try:
+            with open(history_path, 'r') as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+    def _save_history(self, history):
+        history_path = self._get_history_path()
+        with open(history_path, 'w') as f:
+            json.dump(history, f)
+
+    def _update_lora_usage(self, lora_name):
+        history = self._load_history()
+        history[lora_name] = time.time()
+        self._save_history(history)
+
+    def _check_disk_space(self):
+        try:
+            total, used, free = shutil.disk_usage(self.lora_folder)
+            return free
+        except Exception as e:
+            print(f"Error checking disk space: {e}")
+            return 0
+
+    def _delete_least_recently_used_lora(self):
+        history = self._load_history()
+        lora_files = [f for f in os.listdir(self.lora_folder)
+                      if os.path.isfile(os.path.join(self.lora_folder, f))
+                      and not f.startswith('.')
+                      and f != os.path.basename(self._get_history_path())]
+
+        valid_history = {k: v for k, v in history.items() if k in lora_files}
+
+        if not valid_history or not lora_files:
+            print("No LoRA files available for deletion based on history or existing files.")
+            return False
+
+        least_recent_lora_entry = min(valid_history.items(), key=lambda x: x[1])
+        least_recent_file = least_recent_lora_entry[0]
+
+        lora_path_to_delete = os.path.join(self.lora_folder, least_recent_file)
+        if not os.path.exists(lora_path_to_delete):
+            print(f"Skipping deletion of {least_recent_file}, file not found (already deleted or moved).")
+            if least_recent_file in history:
+                history.pop(least_recent_file)
+                self._save_history(history)
+            return False
+
+        last_used_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(least_recent_lora_entry[1]))
+
+        try:
+            file_size_mb = os.path.getsize(lora_path_to_delete) / (1024 * 1024)
+            os.remove(lora_path_to_delete)
+            print(f"Deleted least recently used LoRA: {least_recent_file} "
+                  f"({file_size_mb:.2f} MB, last used: {last_used_time_str})")
+
+            if least_recent_file in history:
+                history.pop(least_recent_file)
+                self._save_history(history)
+            return True
+        except Exception as e:
+            print(f"Error deleting LoRA file {least_recent_file}: {e}")
+            if least_recent_file in history and not os.path.exists(lora_path_to_delete):
+                history.pop(least_recent_file)
+                self._save_history(history)
+            return False
+
+    @classmethod
+    def INPUT_TYPES(s):
+        max_lora_num = 10
+        inputs = {
+            "required": {
+                "toggle": ("BOOLEAN", {"default": True, "label_on": "enabled", "label_off": "disabled"}),
+                "num_loras": ("INT", {"default": 1, "min": 1, "max": max_lora_num, "step": 1}),
+            },
+            "optional": {
+                "prev_lora": ("WANVIDLORA", {"default": None, "tooltip": "For loading multiple LoRAs"}),
+            },
+        }
+
+        for i in range(1, max_lora_num + 1):
+            inputs["optional"][f"lora_{i}_url"] = ("STRING", {
+                "default": "",
+                "multiline": True,
+                "dynamicPrompts": False,
+                "forceInput": False,
+            })
+            inputs["optional"][f"lora_{i}_strength"] = ("FLOAT", {
+                "default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01,
+            })
+        return inputs
+
+    RETURN_TYPES = ("WANVIDLORA",)
+    RETURN_NAMES = ("lora",)
+    FUNCTION = "load_and_select_loras"
+    CATEGORY = "EasyUse/Loaders/Video"
+
+    def download_lora(self, url):
+        filename = ""
+        try:
+            if url.startswith('http'):
+                path_part = url.split('?')[0]
+                filename = os.path.basename(path_part)
+                if not filename or '.' not in filename:
+                    filename_hash = hashlib.md5(url.encode('utf-8')).hexdigest()
+                    filename = f"{filename_hash}.safetensors"
+            elif os.path.exists(url):
+                filename = os.path.basename(url)
+            else:
+                print(f"Invalid LoRA URL or local path: {url}")
+                return None
+
+            filename = "".join(c if c.isalnum() or c in ['.', '_', '-'] else '_' for c in filename)
+            if not filename:
+                filename_hash = hashlib.md5(url.encode('utf-8')).hexdigest()
+                filename = f"{filename_hash}.safetensors"
+
+            full_path = os.path.join(self.lora_folder, filename)
+
+            if os.path.exists(full_path):
+                print(f"LoRA file {filename} already exists, skipping download.")
+                self._update_lora_usage(filename)
+                return filename
+
+            MIN_FREE_SPACE_MB = 2048
+            free_space_bytes = self._check_disk_space()
+            free_space_mb = free_space_bytes / (1024 * 1024)
+            estimated_lora_size_mb = 150
+
+            if free_space_mb < MIN_FREE_SPACE_MB + estimated_lora_size_mb:
+                print(f"Low disk space: {free_space_mb:.2f}MB available. Need ~{estimated_lora_size_mb}MB + {MIN_FREE_SPACE_MB}MB buffer.")
+                while free_space_mb < MIN_FREE_SPACE_MB + estimated_lora_size_mb:
+                    deleted = self._delete_least_recently_used_lora()
+                    if not deleted:
+                        print(f"Could not free up enough space for new LoRA from {url}. Download aborted.")
+                        return None
+                    free_space_bytes = self._check_disk_space()
+                    free_space_mb = free_space_bytes / (1024 * 1024)
+                    if free_space_mb >= MIN_FREE_SPACE_MB + estimated_lora_size_mb:
+                        print(f"Freed up space. Now {free_space_mb:.2f}MB available.")
+                        break
+                if free_space_mb < MIN_FREE_SPACE_MB + estimated_lora_size_mb:
+                    print(f"Still not enough space after cleanup for {url}. Download aborted.")
+                    return None
+
+            if url.startswith('http'):
+                print(f"Downloading LoRA from {url} to {filename}")
+                response = requests.get(url, stream=True)
+                response.raise_for_status()
+
+                downloaded_size = 0
+                with open(full_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+
+                downloaded_size_mb = downloaded_size / (1024 * 1024)
+                print(f"Downloaded {filename} ({downloaded_size_mb:.2f} MB) to {full_path}")
+                self._update_lora_usage(filename)
+                return filename
+
+            elif os.path.exists(url):
+                print(f"Copying LoRA from {url} to {full_path}")
+                shutil.copy2(url, full_path)
+                self._update_lora_usage(filename)
+                print(f"Copied {filename} to {full_path}")
+                return filename
+
+            return None
+
+        except requests.exceptions.RequestException as e:
+            print(f"Error downloading LoRA from {url}: {e}")
+            if filename and os.path.exists(os.path.join(self.lora_folder, filename)):
+                try:
+                    os.remove(os.path.join(self.lora_folder, filename))
+                    print(f"Removed partially downloaded file: {filename}")
+                except Exception as rm_e:
+                    print(f"Error removing partially downloaded file {filename}: {rm_e}")
+            return None
+        except Exception as e:
+            print(f"An unexpected error occurred with LoRA {url} (filename: {filename}): {e}")
+            return None
+
+    def load_and_select_loras(self, toggle, num_loras, prev_lora=None, **kwargs):
+        if not toggle:
+            return (prev_lora or [],)
+
+        loras_list = list(prev_lora) if prev_lora else []
+
+        for i in range(1, int(num_loras) + 1):
+            lora_url = kwargs.get(f"lora_{i}_url", "").strip()
+            strength = float(kwargs.get(f"lora_{i}_strength", 1.0))
+
+            if not lora_url or strength == 0.0:
+                continue
+
+            lora_filename = self.download_lora(lora_url)
+
+            if lora_filename:
+                print(f"Adding LoRA: {lora_filename} with strength: {strength}")
+                loras_list.append({
+                    "path": os.path.join(self.lora_folder, lora_filename),
+                    "strength": round(strength, 4),
+                    "name": os.path.splitext(lora_filename)[0],
+                    "blocks": {},
+                    "layer_filter": "",
+                    "low_mem_load": False,
+                    "merge_loras": True,
+                })
+            else:
+                print(f"Failed to download or locate LoRA from {lora_url}, skipping.")
+
+        folder_paths.get_filename_list("loras")
+        return (loras_list,)
