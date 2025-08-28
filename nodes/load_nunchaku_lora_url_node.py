@@ -7,6 +7,7 @@ import folder_paths
 import json
 import time
 import shutil
+import pickle
 from pathlib import Path
 
 from nunchaku.lora.flux import to_diffusers
@@ -180,6 +181,46 @@ class LoadNunchakuLoraFromUrlOrPath:
         history[lora_name] = time.time()
         self._save_history(history)
 
+    def _get_nunchaku_cache_path(self, lora_path):
+        """Get the path for the cached nunchaku file"""
+        base_path = os.path.splitext(lora_path)[0]
+        return f"{base_path}_nunchaku.pkl"
+
+    def _save_nunchaku_cache(self, lora_path, converted_data):
+        """Save converted nunchaku data to disk"""
+        try:
+            cache_path = self._get_nunchaku_cache_path(lora_path)
+            with open(cache_path, 'wb') as f:
+                pickle.dump(converted_data, f)
+            print(f"Saved nunchaku cache to {cache_path}")
+            return True
+        except Exception as e:
+            print(f"Error saving nunchaku cache: {e}")
+            return False
+
+    def _load_nunchaku_cache(self, lora_path):
+        """Load cached nunchaku data from disk"""
+        try:
+            cache_path = self._get_nunchaku_cache_path(lora_path)
+            if not os.path.exists(cache_path):
+                return None
+            
+            # Check if cache is newer than original lora file
+            lora_mtime = os.path.getmtime(lora_path)
+            cache_mtime = os.path.getmtime(cache_path)
+            
+            if cache_mtime < lora_mtime:
+                print(f"Nunchaku cache is outdated for {lora_path}, will reconvert")
+                return None
+            
+            with open(cache_path, 'rb') as f:
+                converted_data = pickle.load(f)
+            print(f"Loaded nunchaku cache from {cache_path}")
+            return converted_data
+        except Exception as e:
+            print(f"Error loading nunchaku cache: {e}")
+            return None
+
     def _get_volume_root(self):
         """Detect the mounted volume root path"""
         # Try to find the network-volume path by going up from lora_folder
@@ -339,6 +380,15 @@ class LoadNunchakuLoraFromUrlOrPath:
 
                 os.remove(lora_path)
                 print(f"Successfully deleted LoRA: {least_recent_file} ({file_size:.2f} MB)")
+
+                # Also delete the corresponding nunchaku cache file if it exists
+                cache_path = self._get_nunchaku_cache_path(lora_path)
+                if os.path.exists(cache_path):
+                    try:
+                        os.remove(cache_path)
+                        print(f"Also deleted nunchaku cache: {os.path.basename(cache_path)}")
+                    except Exception as e:
+                        print(f"Could not delete nunchaku cache: {e}")
 
                 # Update history by removing the deleted file
                 history.pop(least_recent_file, None)
@@ -638,8 +688,16 @@ class LoadNunchakuLoraFromUrlOrPath:
         lora_path = folder_paths.get_full_path_or_raise("loras", lora_name)
         ret_model_wrapper.loras.append((lora_path, lora_strength))
 
-        # Convert LoRA to Nunchaku format
-        sd = to_diffusers(lora_path)
+        # Try to load cached nunchaku data first
+        sd = self._load_nunchaku_cache(lora_path)
+        
+        if sd is None:
+            # Convert LoRA to Nunchaku format and cache it
+            print(f"Converting LoRA {lora_name} to Nunchaku format...")
+            sd = to_diffusers(lora_path)
+            self._save_nunchaku_cache(lora_path, sd)
+        else:
+            print(f"Using cached Nunchaku conversion for {lora_name}")
 
         # To handle FLUX.1 tools LoRAs, which change the number of input channels
         if "transformer.x_embedder.lora_A.weight" in sd:
