@@ -7,7 +7,6 @@ import folder_paths
 import json
 import time
 import shutil
-import pickle
 from pathlib import Path
 
 from nunchaku.lora.flux import to_diffusers
@@ -18,29 +17,32 @@ try:
     # Try to import from the ComfyUI-nunchaku custom node
     import sys
     import os
-    
+
     # Get the custom_nodes directory path
     current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     custom_nodes_dir = os.path.dirname(current_dir)
     nunchaku_path = os.path.join(custom_nodes_dir, "ComfyUI-nunchaku")
-    
+
     if os.path.exists(nunchaku_path):
         sys.path.insert(0, nunchaku_path)
         from wrappers.flux import ComfyFluxWrapper
+
         print("Successfully imported ComfyFluxWrapper from ComfyUI-nunchaku")
     else:
         print("ComfyUI-nunchaku directory not found, trying alternative imports...")
         raise ImportError("ComfyUI-nunchaku not found")
-        
+
 except ImportError:
     try:
         # Alternative import approaches
         from ComfyUI_nunchaku.wrappers.flux import ComfyFluxWrapper
+
         print("Successfully imported ComfyFluxWrapper from ComfyUI_nunchaku")
     except ImportError:
         try:
             # Try direct import if it's in the path
             from wrappers.flux import ComfyFluxWrapper
+
             print("Successfully imported ComfyFluxWrapper directly")
         except ImportError:
             print("Warning: Could not import ComfyFluxWrapper. Make sure ComfyUI-nunchaku is installed.")
@@ -59,7 +61,7 @@ class LoadNunchakuLoraFromUrlOrPath:
     Node for loading LoRA files from URLs or paths and applying them to Nunchaku FLUX models.
     Combines URL/path loading with caching and Nunchaku-specific LoRA conversion.
     """
-    
+
     def __init__(self):
         # Initialize lora folder path
         self.lora_folder = folder_paths.get_folder_paths("loras")[0]
@@ -180,46 +182,6 @@ class LoadNunchakuLoraFromUrlOrPath:
         history = self._load_history()
         history[lora_name] = time.time()
         self._save_history(history)
-
-    def _get_nunchaku_cache_path(self, lora_path):
-        """Get the path for the cached nunchaku file"""
-        base_path = os.path.splitext(lora_path)[0]
-        return f"{base_path}_nunchaku.pkl"
-
-    def _save_nunchaku_cache(self, lora_path, converted_data):
-        """Save converted nunchaku data to disk"""
-        try:
-            cache_path = self._get_nunchaku_cache_path(lora_path)
-            with open(cache_path, 'wb') as f:
-                pickle.dump(converted_data, f)
-            print(f"Saved nunchaku cache to {cache_path}")
-            return True
-        except Exception as e:
-            print(f"Error saving nunchaku cache: {e}")
-            return False
-
-    def _load_nunchaku_cache(self, lora_path):
-        """Load cached nunchaku data from disk"""
-        try:
-            cache_path = self._get_nunchaku_cache_path(lora_path)
-            if not os.path.exists(cache_path):
-                return None
-            
-            # Check if cache is newer than original lora file
-            lora_mtime = os.path.getmtime(lora_path)
-            cache_mtime = os.path.getmtime(cache_path)
-            
-            if cache_mtime < lora_mtime:
-                print(f"Nunchaku cache is outdated for {lora_path}, will reconvert")
-                return None
-            
-            with open(cache_path, 'rb') as f:
-                converted_data = pickle.load(f)
-            print(f"Loaded nunchaku cache from {cache_path}")
-            return converted_data
-        except Exception as e:
-            print(f"Error loading nunchaku cache: {e}")
-            return None
 
     def _get_volume_root(self):
         """Detect the mounted volume root path"""
@@ -380,15 +342,6 @@ class LoadNunchakuLoraFromUrlOrPath:
 
                 os.remove(lora_path)
                 print(f"Successfully deleted LoRA: {least_recent_file} ({file_size:.2f} MB)")
-
-                # Also delete the corresponding nunchaku cache file if it exists
-                cache_path = self._get_nunchaku_cache_path(lora_path)
-                if os.path.exists(cache_path):
-                    try:
-                        os.remove(cache_path)
-                        print(f"Also deleted nunchaku cache: {os.path.basename(cache_path)}")
-                    except Exception as e:
-                        print(f"Could not delete nunchaku cache: {e}")
 
                 # Update history by removing the deleted file
                 history.pop(least_recent_file, None)
@@ -596,13 +549,13 @@ class LoadNunchakuLoraFromUrlOrPath:
                     "MODEL",
                     {
                         "tooltip": "The diffusion model the LoRA will be applied to. "
-                        "Make sure the model is loaded by `Nunchaku FLUX DiT Loader`."
+                                   "Make sure the model is loaded by `Nunchaku FLUX DiT Loader`."
                     },
                 ),
                 "lora_url": (
-                    "STRING", 
+                    "STRING",
                     {
-                        "default": "", 
+                        "default": "",
                         "multiline": True,
                         "tooltip": "URL or local path to the LoRA file to download/load."
                     }
@@ -658,7 +611,7 @@ class LoadNunchakuLoraFromUrlOrPath:
 
         # Download/copy the LoRA file with disk space management
         lora_name = self.download_lora(lora_url.strip())
-        
+
         if not lora_name:
             print(f"Failed to download/load LoRA from {lora_url}")
             return (model,)
@@ -666,11 +619,12 @@ class LoadNunchakuLoraFromUrlOrPath:
         print(f"Successfully loaded LoRA: {lora_name}")
 
         model_wrapper = model.model.diffusion_model
-        
+
         # Check if this is a ComfyFluxWrapper (flexible check)
         wrapper_type_name = type(model_wrapper).__name__
         if wrapper_type_name != "ComfyFluxWrapper":
-            print(f"Error: Expected ComfyFluxWrapper, got {wrapper_type_name}. Make sure the model is loaded by Nunchaku FLUX DiT Loader.")
+            print(
+                f"Error: Expected ComfyFluxWrapper, got {wrapper_type_name}. Make sure the model is loaded by Nunchaku FLUX DiT Loader.")
             return (model,)
 
         transformer = model_wrapper.model
@@ -688,16 +642,8 @@ class LoadNunchakuLoraFromUrlOrPath:
         lora_path = folder_paths.get_full_path_or_raise("loras", lora_name)
         ret_model_wrapper.loras.append((lora_path, lora_strength))
 
-        # Try to load cached nunchaku data first
-        sd = self._load_nunchaku_cache(lora_path)
-        
-        if sd is None:
-            # Convert LoRA to Nunchaku format and cache it
-            print(f"Converting LoRA {lora_name} to Nunchaku format...")
-            sd = to_diffusers(lora_path)
-            self._save_nunchaku_cache(lora_path, sd)
-        else:
-            print(f"Using cached Nunchaku conversion for {lora_name}")
+        # Convert LoRA to Nunchaku format
+        sd = to_diffusers(lora_path)
 
         # To handle FLUX.1 tools LoRAs, which change the number of input channels
         if "transformer.x_embedder.lora_A.weight" in sd:
