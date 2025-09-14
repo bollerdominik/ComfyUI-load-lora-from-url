@@ -2,8 +2,10 @@ import os
 import requests
 from io import BytesIO
 import folder_paths
-from comfy.comfy_types import IO, ComfyNodeABC
-from comfy_api.latest import InputImpl
+import cv2
+import numpy as np
+import torch
+from comfy.comfy_types import ComfyNodeABC
 
 
 def load_video(video_source):
@@ -52,14 +54,51 @@ class LoadVideoByUrlOrPath(ComfyNodeABC):
             }
         }
 
-    RETURN_TYPES = (IO.VIDEO,)
+    RETURN_TYPES = ("IMAGE", "FLOAT")
+    RETURN_NAMES = ("frames", "fps")
     FUNCTION = "load"
     CATEGORY = "image/video"
+
+    def extract_frames(self, video_path):
+        """Extract frames from video and return as torch tensor along with fps"""
+        video_cap = cv2.VideoCapture(video_path)
+        if not video_cap.isOpened():
+            raise ValueError(f"Could not open video file: {video_path}")
+
+        # Get video properties
+        fps = video_cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(video_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        frames = []
+        frame_count = 0
+
+        while True:
+            ret, frame = video_cap.read()
+            if not ret:
+                break
+
+            # Convert BGR to RGB (opencv loads as BGR)
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # Convert to float32 and normalize to [0,1] range
+            frame = np.array(frame, dtype=np.float32) / 255.0
+            frames.append(frame)
+            frame_count += 1
+
+        video_cap.release()
+
+        if len(frames) == 0:
+            raise ValueError(f"No frames extracted from video: {video_path}")
+
+        # Convert to torch tensor with shape [num_frames, height, width, channels]
+        frames_tensor = torch.from_numpy(np.stack(frames))
+
+        return frames_tensor, float(fps)
 
     def load(self, url_or_path):
         print(f"Loading video from: {url_or_path}")
         video_path, name = load_video(url_or_path)
-        return (InputImpl.VideoFromFile(video_path),)
+        frames, fps = self.extract_frames(video_path)
+        return (frames, fps)
 
 
 if __name__ == "__main__":
