@@ -12,10 +12,18 @@ def load_video(video_source):
         response = requests.get(video_source)
         response.raise_for_status()
 
-        # Get filename from URL or use a default
-        file_name = video_source.split('/')[-1]
+        # Get filename from URL, removing query parameters
+        url_path = video_source.split('?')[0]  # Remove query parameters
+        file_name = url_path.split('/')[-1]
+
+        # If no valid filename found, create one
         if not file_name or '.' not in file_name:
             file_name = "downloaded_video.mp4"
+
+        # Clean filename of invalid characters for Windows
+        invalid_chars = '<>:"/\\|?*'
+        for char in invalid_chars:
+            file_name = file_name.replace(char, '_')
 
         # Save to temp file
         temp_dir = folder_paths.get_temp_directory()
