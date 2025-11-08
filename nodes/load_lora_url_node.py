@@ -272,6 +272,18 @@ class LoadLoraByUrlOrPath:
                                                time.localtime(least_recent_lora[1]))
 
                 print(f"Selected for deletion: {least_recent_file} (last used: {last_used_time})")
+
+                # NEVER delete files containing "Lightning" (case insensitive)
+                if "lightning" in least_recent_file.lower():
+                    print(f"SKIPPING deletion: {least_recent_file} contains 'Lightning' and is protected")
+                    # Remove this file from consideration and try the next one
+                    valid_history.pop(least_recent_file, None)
+                    if valid_history:
+                        print("Looking for next least recently used file...")
+                        return self._delete_least_recently_used_lora()
+                    else:
+                        print("No more files available for deletion (all remaining files are protected)")
+                        return False
             except Exception as e:
                 print(f"ERROR finding least recent file: {e}")
                 return False
