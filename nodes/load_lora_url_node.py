@@ -171,14 +171,37 @@ class LoadLoraByUrlOrPath:
             print(f"Error calculating folder size for {folder_path}: {e}")
             return 0
 
+    def _get_actual_used_space(self):
+        """Calculate actual used space in the LoRA folder by summing file sizes"""
+        return self._calculate_folder_size(self.lora_folder)
+
     def _check_disk_space(self):
-        """Check available disk space in the LoRA folder"""
+        """Check available disk space in the LoRA folder
+        Returns: tuple (free_space_bytes, is_reliable)
+        - free_space_bytes: available space in bytes
+        - is_reliable: True if disk reading is trustworthy, False if unreliable
+        """
         try:
             total, used, free = shutil.disk_usage(self.lora_folder)
-            return free
+            free_gb = free / (1024 ** 3)
+
+            # If free space > 200 GB, it's unreliable (network volume issue)
+            if free_gb > 200:
+                print(f"Unreliable disk reading detected ({free_gb:.1f} GB free). Using calculated space.")
+                # Use hardcoded max of 200 GB
+                MAX_DISK_SPACE_GB = 200
+                actual_used_bytes = self._get_actual_used_space()
+                actual_used_gb = actual_used_bytes / (1024 ** 3)
+                free_space = (MAX_DISK_SPACE_GB * 1024 ** 3) - actual_used_bytes
+                print(f"Actual used space: {actual_used_gb:.2f} GB, Calculated free: {free_space / (1024 ** 3):.2f} GB")
+                return (free_space, False)  # False = unreliable system reading
+            else:
+                # Trust the system reading
+                print(f"Reliable disk reading: {free_gb:.2f} GB free")
+                return (free, True)  # True = reliable system reading
         except Exception as e:
             print(f"Error checking disk space: {e}")
-            return 0
+            return (0, True)
 
     def _check_volume_size(self):
         """Check the actual volume usage for mounted filesystems"""
@@ -410,9 +433,13 @@ class LoadLoraByUrlOrPath:
                 else:
                     print(f"Existing LoRA file {filename} was invalid and removed, re-downloading...")
 
-            # Check available disk space before downloading (original method)
-            MIN_FREE_SPACE = 2 * 1024 * 1024 * 1024  # 2GB in bytes
-            free_space = self._check_disk_space()
+            # Check available disk space before downloading
+            free_space, is_reliable = self._check_disk_space()
+
+            # Set minimum free space based on disk reliability
+            # Unreliable (network volume): keep 10 GB free
+            # Reliable (normal disk): keep 5 GB free
+            MIN_FREE_SPACE = (5 * 1024 ** 3) if is_reliable else (10 * 1024 ** 3)  # 5GB or 10GB in bytes
 
             # Check volume size (new method for mounted filesystems)
             current_volume_size, volume_root = self._check_volume_size()
@@ -424,7 +451,7 @@ class LoadLoraByUrlOrPath:
             # Check traditional disk space
             if free_space < MIN_FREE_SPACE and free_space > 0:  # free_space > 0 means the check worked
                 need_cleanup = True
-                cleanup_reason = f"Low disk space: {free_space / (1024 ** 3):.2f}GB available. Need at least 2GB."
+                cleanup_reason = f"Low disk space: {free_space / (1024 ** 3):.2f}GB available. Need at least {MIN_FREE_SPACE / (1024 ** 3):.0f}GB."
 
             # Check volume size (for mounted filesystems)
             if current_volume_size > self.VOLUME_CLEANUP_THRESHOLD:
@@ -444,7 +471,9 @@ class LoadLoraByUrlOrPath:
 
                 while cleanup_attempts < max_cleanup_attempts:
                     # Check current space before attempting cleanup
-                    free_space = self._check_disk_space()
+                    free_space, is_reliable = self._check_disk_space()
+                    # Update MIN_FREE_SPACE in case reliability changed
+                    MIN_FREE_SPACE = (5 * 1024 ** 3) if is_reliable else (10 * 1024 ** 3)
                     current_volume_size, _ = self._check_volume_size()
 
                     print(f"Cleanup attempt {cleanup_attempts + 1}:")
@@ -476,7 +505,8 @@ class LoadLoraByUrlOrPath:
                 if cleanup_attempts >= max_cleanup_attempts:
                     print(f"Reached maximum cleanup attempts ({max_cleanup_attempts}), stopping cleanup")
 
-                final_free_space = self._check_disk_space()
+                final_free_space, is_reliable = self._check_disk_space()
+                MIN_FREE_SPACE = (5 * 1024 ** 3) if is_reliable else (10 * 1024 ** 3)
                 final_volume_size, _ = self._check_volume_size()
                 final_space_ok = (final_free_space >= MIN_FREE_SPACE or final_free_space == 0)
                 final_volume_ok = final_volume_size <= self.VOLUME_CLEANUP_THRESHOLD
