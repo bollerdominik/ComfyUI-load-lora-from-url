@@ -1,12 +1,14 @@
 from .nodes.load_lora_url_node import LoadLoraByUrlOrPath
 from .nodes.load_video_lora_url_node import LoadVideoLoraByUrlOrPath, LoadVideoLoraByUrlOrPathSelect
 from .nodes.load_video_url_node import LoadVideoByUrlOrPath
+from .nodes.load_upscale_model_url_node import LoadUpscaleModelByUrlOrPath
 
 NODE_CLASS_MAPPINGS = {
     "LoadLoraFromUrlOrPath": LoadLoraByUrlOrPath,
     "LoadVideoLoraFromUrlOrPath": LoadVideoLoraByUrlOrPath,
     "LoadVideoLoraFromUrlOrPathSelect": LoadVideoLoraByUrlOrPathSelect,
     "LoadVideoFromUrlOrPath": LoadVideoByUrlOrPath,
+    "LoadUpscaleModelFromUrlOrPath": LoadUpscaleModelByUrlOrPath,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -14,6 +16,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LoadVideoLoraFromUrlOrPath": "Load Video LoRA (URL/Path) & Apply",
     "LoadVideoLoraFromUrlOrPathSelect": "Load Video LoRA (URL/Path) Wan",
     "LoadVideoFromUrlOrPath": "Load Video (URL/Path)",
+    "LoadUpscaleModelFromUrlOrPath": "Load Upscale Model (URL/Path)",
 }
 
 # Conditionally load nunchaku node if module is available
