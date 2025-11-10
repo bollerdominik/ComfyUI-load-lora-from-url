@@ -54,14 +54,47 @@ class LoadVideoLoraByUrlOrPath:
         history[lora_name] = time.time()
         self._save_history(history)
 
+    def _get_actual_used_space(self):
+        """Calculate actual used space in the LoRA folder by summing file sizes"""
+        try:
+            total_size = 0
+            for root, dirs, files in os.walk(self.lora_folder):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    if os.path.isfile(file_path):
+                        total_size += os.path.getsize(file_path)
+            return total_size
+        except Exception as e:
+            print(f"Error calculating actual used space: {e}")
+            return 0
+
     def _check_disk_space(self):
-        """Check available disk space in the LoRA folder"""
+        """Check available disk space in the LoRA folder
+        Returns: tuple (free_space_bytes, is_reliable)
+        - free_space_bytes: available space in bytes
+        - is_reliable: True if disk reading is trustworthy, False if unreliable
+        """
         try:
             total, used, free = shutil.disk_usage(self.lora_folder)
-            return free
+            free_gb = free / (1024 ** 3)
+
+            # If free space > 200 GB, it's unreliable (network volume issue)
+            if free_gb > 200:
+                print(f"Unreliable disk reading detected ({free_gb:.1f} GB free). Using calculated space.")
+                # Use hardcoded max of 200 GB
+                MAX_DISK_SPACE_GB = 200
+                actual_used_bytes = self._get_actual_used_space()
+                actual_used_gb = actual_used_bytes / (1024 ** 3)
+                free_space = (MAX_DISK_SPACE_GB * 1024 ** 3) - actual_used_bytes
+                print(f"Actual used space: {actual_used_gb:.2f} GB, Calculated free: {free_space / (1024 ** 3):.2f} GB")
+                return (free_space, False)  # False = unreliable system reading
+            else:
+                # Trust the system reading
+                print(f"Reliable disk reading: {free_gb:.2f} GB free")
+                return (free, True)  # True = reliable system reading
         except Exception as e:
             print(f"Error checking disk space: {e}")
-            return 0
+            return (0, True)
 
     def _delete_least_recently_used_lora(self):
         """Delete the least recently used LoRA file to free up space"""
@@ -178,9 +211,14 @@ class LoadVideoLoraByUrlOrPath:
                 self._update_lora_usage(filename)
                 return filename
 
-            MIN_FREE_SPACE_MB = 2048  # 2GB in MB
-            free_space_bytes = self._check_disk_space()
+            # Check disk space and determine which threshold to use
+            free_space_bytes, is_reliable = self._check_disk_space()
             free_space_mb = free_space_bytes / (1024 * 1024)
+
+            # Set minimum free space based on disk reliability
+            # Unreliable (network volume): keep 10 GB free
+            # Reliable (normal disk): keep 5 GB free
+            MIN_FREE_SPACE_MB = 5120 if is_reliable else 10240  # 5GB or 10GB in MB
 
             # Estimate required space (very rough, actual size unknown until download)
             # Let's assume an average LoRA size for initial check or just use a fixed buffer
@@ -194,7 +232,7 @@ class LoadVideoLoraByUrlOrPath:
                     if not deleted:
                         print(f"Could not free up enough space for new LoRA from {url}. Download aborted.")
                         return None
-                    free_space_bytes = self._check_disk_space()
+                    free_space_bytes, is_reliable = self._check_disk_space()
                     free_space_mb = free_space_bytes / (1024 * 1024)
                     if free_space_mb >= MIN_FREE_SPACE_MB + estimated_lora_size_mb:
                         print(f"Freed up space. Now {free_space_mb:.2f}MB available.")
@@ -317,13 +355,47 @@ class LoadVideoLoraByUrlOrPathSelect:
         history[lora_name] = time.time()
         self._save_history(history)
 
+    def _get_actual_used_space(self):
+        """Calculate actual used space in the LoRA folder by summing file sizes"""
+        try:
+            total_size = 0
+            for root, dirs, files in os.walk(self.lora_folder):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    if os.path.isfile(file_path):
+                        total_size += os.path.getsize(file_path)
+            return total_size
+        except Exception as e:
+            print(f"Error calculating actual used space: {e}")
+            return 0
+
     def _check_disk_space(self):
+        """Check available disk space in the LoRA folder
+        Returns: tuple (free_space_bytes, is_reliable)
+        - free_space_bytes: available space in bytes
+        - is_reliable: True if disk reading is trustworthy, False if unreliable
+        """
         try:
             total, used, free = shutil.disk_usage(self.lora_folder)
-            return free
+            free_gb = free / (1024 ** 3)
+
+            # If free space > 200 GB, it's unreliable (network volume issue)
+            if free_gb > 200:
+                print(f"Unreliable disk reading detected ({free_gb:.1f} GB free). Using calculated space.")
+                # Use hardcoded max of 200 GB
+                MAX_DISK_SPACE_GB = 200
+                actual_used_bytes = self._get_actual_used_space()
+                actual_used_gb = actual_used_bytes / (1024 ** 3)
+                free_space = (MAX_DISK_SPACE_GB * 1024 ** 3) - actual_used_bytes
+                print(f"Actual used space: {actual_used_gb:.2f} GB, Calculated free: {free_space / (1024 ** 3):.2f} GB")
+                return (free_space, False)  # False = unreliable system reading
+            else:
+                # Trust the system reading
+                print(f"Reliable disk reading: {free_gb:.2f} GB free")
+                return (free, True)  # True = reliable system reading
         except Exception as e:
             print(f"Error checking disk space: {e}")
-            return 0
+            return (0, True)
 
     def _delete_least_recently_used_lora(self):
         history = self._load_history()
@@ -425,9 +497,14 @@ class LoadVideoLoraByUrlOrPathSelect:
                 self._update_lora_usage(filename)
                 return filename
 
-            MIN_FREE_SPACE_MB = 2048
-            free_space_bytes = self._check_disk_space()
+            # Check disk space and determine which threshold to use
+            free_space_bytes, is_reliable = self._check_disk_space()
             free_space_mb = free_space_bytes / (1024 * 1024)
+
+            # Set minimum free space based on disk reliability
+            # Unreliable (network volume): keep 10 GB free
+            # Reliable (normal disk): keep 5 GB free
+            MIN_FREE_SPACE_MB = 5120 if is_reliable else 10240  # 5GB or 10GB in MB
             estimated_lora_size_mb = 150
 
             if free_space_mb < MIN_FREE_SPACE_MB + estimated_lora_size_mb:
@@ -437,7 +514,7 @@ class LoadVideoLoraByUrlOrPathSelect:
                     if not deleted:
                         print(f"Could not free up enough space for new LoRA from {url}. Download aborted.")
                         return None
-                    free_space_bytes = self._check_disk_space()
+                    free_space_bytes, is_reliable = self._check_disk_space()
                     free_space_mb = free_space_bytes / (1024 * 1024)
                     if free_space_mb >= MIN_FREE_SPACE_MB + estimated_lora_size_mb:
                         print(f"Freed up space. Now {free_space_mb:.2f}MB available.")
