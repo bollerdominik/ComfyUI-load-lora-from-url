@@ -137,23 +137,6 @@ class LoadLoraByUrlOrPath:
         history[lora_name] = time.time()
         self._save_history(history)
 
-    def _get_volume_root(self):
-        """Detect the mounted volume root path"""
-        # Try to find the network-volume path by going up from lora_folder
-        current_path = os.path.abspath(self.lora_folder)
-
-        # Look for common mounted volume patterns
-        volume_indicators = ['network-volume', 'workspace']
-
-        while current_path != '/':
-            folder_name = os.path.basename(current_path)
-            if any(indicator in folder_name for indicator in volume_indicators):
-                return current_path
-            current_path = os.path.dirname(current_path)
-
-        # If no specific volume found, use the lora folder itself
-        return self.lora_folder
-
     def _calculate_folder_size(self, folder_path):
         """Calculate total size of a folder and all its contents"""
         try:
@@ -174,11 +157,10 @@ class LoadLoraByUrlOrPath:
     def _get_actual_used_space(self):
         """Calculate actual used space in the volume folder (workspace/network-volume)"""
         import subprocess
-        volume_root = self._get_volume_root()
 
         # Use du -sb for bytes output (more reliable than -sh for parsing)
         result = subprocess.run(
-            ['du', '-sb', volume_root],
+            ['du', '-sb', '/workspace/network-volume'],
             capture_output=True,
             text=True,
             timeout=30
@@ -187,7 +169,7 @@ class LoadLoraByUrlOrPath:
         # Output format: "12345678\t/path/to/folder"
         size_str = result.stdout.split()[0]
         total_size = int(size_str)
-        print(f"du command result: {total_size / (1024 ** 3):.2f}GB for {volume_root}")
+        print(f"du command result: {total_size / (1024 ** 3):.2f}GB for /workspace/network-volume")
         return total_size
 
     def _check_disk_space(self):
@@ -221,8 +203,19 @@ class LoadLoraByUrlOrPath:
     def _check_volume_size(self):
         """Check the actual volume usage for mounted filesystems"""
         try:
-            volume_root = self._get_volume_root()
-            current_size = self._calculate_folder_size(volume_root)
+            import subprocess
+            volume_root = '/workspace/network-volume'
+
+            # Use du -sb for bytes output
+            result = subprocess.run(
+                ['du', '-sb', volume_root],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            size_str = result.stdout.split()[0]
+            current_size = int(size_str)
 
             print(f"Volume root: {volume_root}")
             print(f"Current volume usage: {current_size / (1024 ** 3):.2f}GB")
