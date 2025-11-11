@@ -172,8 +172,23 @@ class LoadLoraByUrlOrPath:
             return 0
 
     def _get_actual_used_space(self):
-        """Calculate actual used space in the LoRA folder by summing file sizes"""
-        return self._calculate_folder_size(self.lora_folder)
+        """Calculate actual used space in the volume folder (workspace/network-volume)"""
+        import subprocess
+        volume_root = self._get_volume_root()
+
+        # Use du -sb for bytes output (more reliable than -sh for parsing)
+        result = subprocess.run(
+            ['du', '-sb', volume_root],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        # Output format: "12345678\t/path/to/folder"
+        size_str = result.stdout.split()[0]
+        total_size = int(size_str)
+        print(f"du command result: {total_size / (1024 ** 3):.2f}GB for {volume_root}")
+        return total_size
 
     def _check_disk_space(self):
         """Check available disk space in the LoRA folder
