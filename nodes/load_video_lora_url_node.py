@@ -55,18 +55,22 @@ class LoadVideoLoraByUrlOrPath:
         self._save_history(history)
 
     def _get_actual_used_space(self):
-        """Calculate actual used space in the LoRA folder by summing file sizes"""
-        try:
-            total_size = 0
-            for root, dirs, files in os.walk(self.lora_folder):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    if os.path.isfile(file_path):
-                        total_size += os.path.getsize(file_path)
-            return total_size
-        except Exception as e:
-            print(f"Error calculating actual used space: {e}")
-            return 0
+        """Calculate actual used space in the LoRA folder using du command"""
+        import subprocess
+
+        # Use du -sb for bytes output (more reliable than -sh for parsing)
+        result = subprocess.run(
+            ['du', '-sb', self.lora_folder],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        # Output format: "12345678\t/path/to/folder"
+        size_str = result.stdout.split()[0]
+        total_size = int(size_str)
+        print(f"du command result: {total_size / (1024 ** 3):.2f}GB for {self.lora_folder}")
+        return total_size
 
     def _check_disk_space(self):
         """Check available disk space in the LoRA folder
@@ -356,18 +360,22 @@ class LoadVideoLoraByUrlOrPathSelect:
         self._save_history(history)
 
     def _get_actual_used_space(self):
-        """Calculate actual used space in the LoRA folder by summing file sizes"""
-        try:
-            total_size = 0
-            for root, dirs, files in os.walk(self.lora_folder):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    if os.path.isfile(file_path):
-                        total_size += os.path.getsize(file_path)
-            return total_size
-        except Exception as e:
-            print(f"Error calculating actual used space: {e}")
-            return 0
+        """Calculate actual used space in the LoRA folder using du command"""
+        import subprocess
+
+        # Use du -sb for bytes output (more reliable than -sh for parsing)
+        result = subprocess.run(
+            ['du', '-sb', self.lora_folder],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        # Output format: "12345678\t/path/to/folder"
+        size_str = result.stdout.split()[0]
+        total_size = int(size_str)
+        print(f"du command result: {total_size / (1024 ** 3):.2f}GB for {self.lora_folder}")
+        return total_size
 
     def _check_disk_space(self):
         """Check available disk space in the LoRA folder
