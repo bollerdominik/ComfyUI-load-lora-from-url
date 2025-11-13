@@ -295,41 +295,63 @@ class LoadLoraByUrlOrPath:
                 print("ERROR: No valid history entries found")
                 return False
 
-            # Find least recently used LoRA
-            try:
-                least_recent_lora = min(valid_history.items(), key=lambda x: x[1])
-                least_recent_file = least_recent_lora[0]
-                last_used_time = time.strftime('%Y-%m-%d %H:%M:%S',
-                                               time.localtime(least_recent_lora[1]))
+            # Find least recently used LoRA (loop until we find a deletable file)
+            least_recent_file = None
+            max_attempts = 100  # Prevent infinite loop if all files are protected
+            attempts = 0
 
-                print(f"Selected for deletion: {least_recent_file} (last used: {last_used_time})")
+            while attempts < max_attempts and valid_history:
+                try:
+                    least_recent_lora = min(valid_history.items(), key=lambda x: x[1])
+                    candidate_file = least_recent_lora[0]
+                    last_used_time = time.strftime('%Y-%m-%d %H:%M:%S',
+                                                   time.localtime(least_recent_lora[1]))
 
-                # NEVER delete files containing "Lightning" (case insensitive)
-                if "lightning" in least_recent_file.lower():
-                    print(f"SKIPPING deletion: {least_recent_file} contains 'Lightning' and is protected")
-                    # Remove this file from consideration and try the next one
-                    valid_history.pop(least_recent_file, None)
-                    if valid_history:
-                        print("Looking for next least recently used file...")
-                        return self._delete_least_recently_used_lora()
-                    else:
-                        print("No more files available for deletion (all remaining files are protected)")
-                        return False
-            except Exception as e:
-                print(f"ERROR finding least recent file: {e}")
+                    print(f"Selected for deletion: {candidate_file} (last used: {last_used_time})")
+
+                    # NEVER delete files containing "Lightning" (case insensitive)
+                    if "lightning" in candidate_file.lower():
+                        print(f"SKIPPING deletion: {candidate_file} contains 'Lightning' and is protected")
+                        # Remove this file from consideration and try the next one
+                        valid_history.pop(candidate_file, None)
+                        attempts += 1
+                        if valid_history:
+                            print("Looking for next least recently used file...")
+                            continue
+                        else:
+                            print("No more files available for deletion (all remaining files are protected)")
+                            return False
+
+                    # Check if file exists before trying to delete
+                    lora_path = os.path.join(self.lora_folder, candidate_file)
+                    if not os.path.exists(lora_path):
+                        print(f"File {candidate_file} no longer exists, removing from history")
+                        history.pop(candidate_file, None)
+                        valid_history.pop(candidate_file, None)
+                        self._save_history(history)
+                        attempts += 1
+                        if valid_history:
+                            print("Looking for next least recently used file...")
+                            continue
+                        else:
+                            print("No more files available for deletion")
+                            return False
+
+                    # Found a valid file to delete
+                    least_recent_file = candidate_file
+                    break
+
+                except Exception as e:
+                    print(f"ERROR finding least recent file: {e}")
+                    return False
+
+            if not least_recent_file:
+                print("Could not find any deletable files after checking all candidates")
                 return False
 
             # Delete the file
             try:
                 lora_path = os.path.join(self.lora_folder, least_recent_file)
-
-                # Check if file exists before trying to delete
-                if not os.path.exists(lora_path):
-                    print(f"File {least_recent_file} no longer exists, removing from history")
-                    history.pop(least_recent_file, None)
-                    self._save_history(history)
-                    # Try again with remaining files
-                    return self._delete_least_recently_used_lora()
 
                 file_size = os.path.getsize(lora_path) / (1024 * 1024)  # Size in MB
                 print(f"Attempting to delete: {lora_path} ({file_size:.2f} MB)")
