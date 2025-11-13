@@ -187,11 +187,16 @@ class LoadLoraByUrlOrPath:
         if os.path.exists(self.history_file):
             try:
                 with open(self.history_file, 'r') as f:
-                    return json.load(f)
+                    history = json.load(f)
+                    print(f"Loaded LoRA history: {len(history)} entries")
+                    print(f"History content: {json.dumps(history, indent=2)}")
+                    return history
             except Exception as e:
                 print(f"Error loading history file: {e}")
                 return {}
-        return {}
+        else:
+            print("No history file found, starting fresh")
+            return {}
 
     def _save_history(self, history):
         """Save LoRA usage history to JSON file"""
