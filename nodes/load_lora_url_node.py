@@ -19,6 +19,14 @@ class LoadLoraByUrlOrPath:
         self.history_file = os.path.join(self.lora_folder, "history.json")
         self.min_free_space_gb = 2  # Minimum free space in GB
 
+        # Protected LoRAs that should never be deleted
+        self.protected_keywords = ["lightning"]  # Case insensitive matching
+
+        # Network volume settings
+        self.network_volume_path = "/workspace/network-volume"  # Path to check for network volume
+        self.network_volume_free_space_threshold_gb = 300  # If free space > this, consider unreliable
+        self.network_volume_max_size_gb = 190  # Maximum total size for network volumes
+
 
     @classmethod
     def INPUT_TYPES(s):
@@ -215,24 +223,87 @@ class LoadLoraByUrlOrPath:
         if free_space is None:
             return
 
-        min_free_bytes = self.min_free_space_gb * 1024 * 1024 * 1024
-        print(f"Free space: {free_space / (1024 * 1024 * 1024):.2f} GB")
+        free_space_gb = free_space / (1024 * 1024 * 1024)
+        print(f"Free space: {free_space_gb:.2f} GB")
 
-        if free_space < min_free_bytes:
-            print(f"Low disk space detected. Free space: {free_space / (1024 * 1024 * 1024):.2f} GB")
-            print(f"Attempting to free up space to reach {self.min_free_space_gb} GB...")
-            self._remove_old_loras(min_free_bytes - free_space)
+        # Check if we're on a network volume with unreliable free space reporting
+        if free_space_gb > self.network_volume_free_space_threshold_gb:
+            print(f"Free space > {self.network_volume_free_space_threshold_gb} GB - may be unreliable network volume")
+            print("Switching to total folder size check...")
+            self._manage_network_volume_space()
+        else:
+            # Normal disk space management
+            min_free_bytes = self.min_free_space_gb * 1024 * 1024 * 1024
+            if free_space < min_free_bytes:
+                print(f"Low disk space detected. Free space: {free_space_gb:.2f} GB")
+                print(f"Attempting to free up space to reach {self.min_free_space_gb} GB...")
+                self._remove_old_loras(min_free_bytes - free_space)
+
+    def _is_protected(self, filename):
+        """Check if a file is protected from deletion"""
+        filename_lower = filename.lower()
+        for keyword in self.protected_keywords:
+            if keyword.lower() in filename_lower:
+                return True
+        return False
+
+    def _get_folder_size(self, folder_path=None):
+        """Get total size of a folder in bytes (recursively)"""
+        if folder_path is None:
+            folder_path = self.lora_folder
+
+        total_size = 0
+        try:
+            for dirpath, dirnames, filenames in os.walk(folder_path):
+                for filename in filenames:
+                    filepath = os.path.join(dirpath, filename)
+                    try:
+                        total_size += os.path.getsize(filepath)
+                    except Exception as e:
+                        print(f"Error getting size of {filepath}: {e}")
+        except Exception as e:
+            print(f"Error calculating folder size for {folder_path}: {e}")
+        return total_size
+
+    def _manage_network_volume_space(self):
+        """Manage space for network volumes by checking total network volume size"""
+        # Check if network volume path exists
+        if not os.path.exists(self.network_volume_path):
+            print(f"Network volume path {self.network_volume_path} does not exist")
+            print("Falling back to normal disk space management")
+            return
+
+        # Get total size of the entire network volume
+        total_size = self._get_folder_size(self.network_volume_path)
+        total_size_gb = total_size / (1024 * 1024 * 1024)
+        print(f"Total network volume size ({self.network_volume_path}): {total_size_gb:.2f} GB")
+
+        if total_size_gb > self.network_volume_max_size_gb:
+            bytes_to_free = total_size - (self.network_volume_max_size_gb * 1024 * 1024 * 1024)
+            print(f"Network volume size exceeds {self.network_volume_max_size_gb} GB threshold")
+            print(f"Attempting to free {bytes_to_free / (1024 * 1024 * 1024):.2f} GB from LoRA folder...")
+            self._remove_old_loras(bytes_to_free)
+        else:
+            print(f"Network volume size within limits ({self.network_volume_max_size_gb} GB)")
 
     def _remove_old_loras(self, bytes_needed):
-        """Remove least recently used LoRAs until enough space is freed"""
+        """Remove least recently used LoRAs until enough space is freed (skips protected files)"""
         history = self._load_history()
 
         # Get all LoRA files in the folder with their timestamps
         lora_files = []
+        protected_files = []
+
         for filename in os.listdir(self.lora_folder):
             filepath = os.path.join(self.lora_folder, filename)
             # Skip directories and the history file
             if os.path.isfile(filepath) and filename != "history.json":
+                # Check if file is protected
+                if self._is_protected(filename):
+                    protected_files.append(filename)
+                    print(f"Skipping protected LoRA: {filename}")
+                    continue
+
                 # Use history timestamp if available, otherwise use file modification time
                 timestamp = history.get(filename, os.path.getmtime(filepath))
                 file_size = os.path.getsize(filepath)
@@ -266,6 +337,13 @@ class LoadLoraByUrlOrPath:
             self._save_history(history)
             print(f"Total space freed: {bytes_freed / (1024 * 1024):.2f} MB")
             print(f"Removed {len(removed_files)} LoRA file(s)")
+
+        # Warn if we couldn't free enough space
+        if bytes_freed < bytes_needed:
+            shortage_gb = (bytes_needed - bytes_freed) / (1024 * 1024 * 1024)
+            print(f"WARNING: Could not free enough space. Still need {shortage_gb:.2f} GB more.")
+            if protected_files:
+                print(f"Note: {len(protected_files)} protected file(s) were skipped from deletion.")
 
     def _validate_and_cleanup_file(self, full_path, filename):
         """Validate a LoRA file and remove if invalid (e.g., 0 bytes)"""
