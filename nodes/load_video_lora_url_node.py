@@ -481,39 +481,46 @@ class LoadVideoLoraByUrlOrPathSelect:
 
     def load_and_select_loras(self, toggle, num_loras, prev_lora=None, **kwargs):
         """Load Video LoRA files and return as WANVIDLORA format with usage tracking"""
-        if toggle in [False, None, "False"]:
-            return (prev_lora if prev_lora is not None else [],)
+        if not toggle:
+            return (prev_lora or [],)
 
         # Start with previous loras if provided
-        lora_list = prev_lora if prev_lora is not None else []
+        loras_list = list(prev_lora) if prev_lora else []
 
         # Process each LoRA
-        for i in range(1, num_loras + 1):
-            lora_url = kwargs.get(f"lora_{i}_url", "")
+        for i in range(1, int(num_loras) + 1):
+            lora_url = kwargs.get(f"lora_{i}_url", "").strip()
+            strength = float(kwargs.get(f"lora_{i}_strength", 1.0))
 
-            if not lora_url:
+            if not lora_url or strength == 0.0:
                 continue
 
             # Check disk space and remove old loras if needed
             self._manage_disk_space()
 
             # Download/copy the LoRA file with disk space management
-            lora_name = self.download_lora(lora_url)
+            lora_filename = self.download_lora(lora_url)
 
-            if not lora_name:
+            if not lora_filename:
+                print(f"Failed to download or locate LoRA from {lora_url}, skipping.")
                 continue
 
-            # Get strength value
-            strength = float(kwargs.get(f"lora_{i}_strength", 1.0))
-
-            # Add to lora list as tuple (lora_name, strength)
-            lora_list.append((lora_name, strength))
-            print(f"Added Video LoRA {lora_name} with strength: {strength}")
+            # Add to lora list as dictionary (WANVIDLORA format)
+            print(f"Adding LoRA: {lora_filename} with strength: {strength}")
+            loras_list.append({
+                "path": os.path.join(self.lora_folder, lora_filename),
+                "strength": round(strength, 4),
+                "name": os.path.splitext(lora_filename)[0],
+                "blocks": {},
+                "layer_filter": "",
+                "low_mem_load": False,
+                "merge_loras": False,
+            })
 
         # Refresh the lora list to include newly downloaded files
         folder_paths.get_filename_list("loras")
 
-        return (lora_list,)
+        return (loras_list,)
 
     def _load_history(self):
         """Load LoRA usage history from JSON file"""
