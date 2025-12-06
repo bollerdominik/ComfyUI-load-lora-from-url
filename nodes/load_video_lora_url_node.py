@@ -425,22 +425,6 @@ class LoadVideoLoraByUrlOrPathSelect:
 
     CATEGORY = "EasyUse/Loaders/Video"
 
-    @classmethod
-    def IS_CHANGED(cls, toggle, num_loras, **kwargs):
-        """Return a hash of inputs to enable ComfyUI caching when inputs haven't changed"""
-        # Only hash configuration parameters (not prev_lora object which changes between API calls)
-        hash_input = f"{toggle}_{num_loras}"
-
-        for i in range(1, int(num_loras) + 1):
-            lora_url = kwargs.get(f"lora_{i}_url", "")
-            # Strip query parameters from URL (e.g., AWS signatures) to get stable identifier
-            lora_url_base = lora_url.split('?')[0] if lora_url else ""
-            strength = kwargs.get(f"lora_{i}_strength", 1.0)
-            hash_input += f"_{lora_url_base}_{strength}"
-
-        # Return a hash of the inputs
-        return hashlib.md5(hash_input.encode()).hexdigest()
-
     def download_lora(self, url):
         """Download a LoRA file from URL or copy from local path"""
         # Get filename from url or generate one from hash if no filename is present
