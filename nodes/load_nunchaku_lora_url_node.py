@@ -629,15 +629,20 @@ class LoadNunchakuLoraFromUrlOrPath:
 
         transformer = model_wrapper.model
         model_wrapper.model = None
-        ret_model = copy.deepcopy(model)  # copy everything except the model
-        ret_model_wrapper = ret_model.model.diffusion_model
-        # Flexible check for the copied model wrapper too
-        if type(ret_model_wrapper).__name__ != "ComfyFluxWrapper":
-            print(f"Error: Copied model wrapper is not ComfyFluxWrapper: {type(ret_model_wrapper).__name__}")
-            return (model,)
 
-        model_wrapper.model = transformer
-        ret_model_wrapper.model = transformer
+        try:
+            ret_model = copy.deepcopy(model)  # copy everything except the model
+            ret_model_wrapper = ret_model.model.diffusion_model
+
+            # Flexible check for the copied model wrapper too
+            if type(ret_model_wrapper).__name__ != "ComfyFluxWrapper":
+                print(f"Error: Copied model wrapper is not ComfyFluxWrapper: {type(ret_model_wrapper).__name__}")
+                return (model,)
+
+            ret_model_wrapper.model = transformer
+        finally:
+            # Always restore the original model state, even if an error occurs
+            model_wrapper.model = transformer
 
         lora_path = folder_paths.get_full_path_or_raise("loras", lora_name)
         ret_model_wrapper.loras.append((lora_path, lora_strength))
