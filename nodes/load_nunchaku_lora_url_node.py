@@ -640,6 +640,10 @@ class LoadNunchakuLoraFromUrlOrPath:
                 return (model,)
 
             ret_model_wrapper.model = transformer
+        except Exception as e:
+            print(f"Error during model deepcopy for LoRA file '{lora_name}': {e}")
+            print("This may indicate a corrupted model state. Try restarting ComfyUI or reloading the model.")
+            return (model,)
         finally:
             # Always restore the original model state, even if an error occurs
             model_wrapper.model = transformer
