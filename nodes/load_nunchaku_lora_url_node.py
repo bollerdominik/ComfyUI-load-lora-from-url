@@ -1,4 +1,3 @@
-import copy
 import logging
 import os
 import requests
@@ -627,29 +626,56 @@ class LoadNunchakuLoraFromUrlOrPath:
                 f"Error: Expected ComfyFluxWrapper, got {wrapper_type_name}. Make sure the model is loaded by Nunchaku FLUX DiT Loader.")
             return (model,)
 
-        transformer = model_wrapper.model
-        model_wrapper.model = None
-
-        try:
-            ret_model = copy.deepcopy(model)  # copy everything except the model
-            ret_model_wrapper = ret_model.model.diffusion_model
-
-            # Flexible check for the copied model wrapper too
-            if type(ret_model_wrapper).__name__ != "ComfyFluxWrapper":
-                print(f"Error: Copied model wrapper is not ComfyFluxWrapper: {type(ret_model_wrapper).__name__}")
-                return (model,)
-
-            ret_model_wrapper.model = transformer
-        except Exception as e:
-            print(f"Error during model deepcopy for LoRA file '{lora_name}': {e}")
-            print("This may indicate a corrupted model state. Try restarting ComfyUI or reloading the model.")
-            return (model,)
-        finally:
-            # Always restore the original model state, even if an error occurs
+        # Store clean base model only if input model has no LoRAs (first node in chain)
+        # This ensures we always have a clean base without any LoRA applied
+        if not hasattr(model, 'nunchaku_base_model'):
+            transformer = model_wrapper.model
+            model_wrapper.model = None
+            model.nunchaku_base_model = model.clone()
             model_wrapper.model = transformer
 
+        # Always start from clean base model and rebuild all LoRAs from chain
+        # This prevents accumulation of LoRA weights in transformer
+        transformer = model_wrapper.model
+        base_model_wrapper = model.nunchaku_base_model.model.diffusion_model
+        base_model_wrapper.model = None
+        ret_model = model.nunchaku_base_model.clone()
+        ret_model_wrapper = ret_model.model.diffusion_model
+
+        # Check if this is a ComfyFluxWrapper (flexible check)
+        if type(ret_model_wrapper).__name__ != "ComfyFluxWrapper":
+            print(f"Error: Copied model wrapper is not ComfyFluxWrapper: {type(ret_model_wrapper).__name__}")
+            return (model,)
+
+        base_model_wrapper.model = transformer
+        ret_model_wrapper.model = transformer
+
+        # Reset LoRA state in transformer to ensure clean state
+        if hasattr(ret_model_wrapper.model, 'reset_lora'):
+            ret_model_wrapper.model.reset_lora()
+        if hasattr(ret_model_wrapper.model, 'comfy_lora_meta_list'):
+            ret_model_wrapper.model.comfy_lora_meta_list = []
+        if hasattr(ret_model_wrapper.model, 'comfy_lora_sd_list'):
+            ret_model_wrapper.model.comfy_lora_sd_list = []
+
+        # Use nunchaku_parent_loras to get LoRAs from upstream nodes
+        # This prevents LoRA leakage when downstream node is re-executed but upstream is cached
+        # nunchaku_parent_loras contains LoRAs BEFORE current node, not including current node's LoRA
+        if hasattr(model, 'nunchaku_parent_loras'):
+            upstream_loras = list(model.nunchaku_parent_loras)
+        else:
+            upstream_loras = []
+
         lora_path = folder_paths.get_full_path_or_raise("loras", lora_name)
-        ret_model_wrapper.loras.append((lora_path, lora_strength))
+
+        # Build new LoRA list: upstream + current
+        ret_model_wrapper.loras = upstream_loras + [(lora_path, lora_strength)]
+
+        # Save current LoRA list as parent for next node in chain
+        ret_model.nunchaku_parent_loras = list(ret_model_wrapper.loras)
+
+        # Propagate base model to output for downstream nodes
+        ret_model.nunchaku_base_model = model.nunchaku_base_model
 
         # Convert LoRA to Nunchaku format
         sd = to_diffusers(lora_path)
