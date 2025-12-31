@@ -4,6 +4,7 @@ from .nodes.load_video_url_node import LoadVideoByUrlOrPath
 from .nodes.load_upscale_model_url_node import LoadUpscaleModelByUrlOrPath
 from .nodes.gemini_image2_genai_node import GeminiImage2GenAI
 from .nodes.paste_image_by_mask_node import PasteImageByMask
+from .nodes.cut_image_by_mask_node import CutImageByMask
 
 NODE_CLASS_MAPPINGS = {
     "LoadLoraFromUrlOrPath": LoadLoraByUrlOrPath,
@@ -13,6 +14,7 @@ NODE_CLASS_MAPPINGS = {
     "LoadUpscaleModelFromUrlOrPath": LoadUpscaleModelByUrlOrPath,
     "GeminiImage2GenAI": GeminiImage2GenAI,
     "PasteImageByMask": PasteImageByMask,
+    "CutImageByMask": CutImageByMask,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -23,6 +25,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LoadUpscaleModelFromUrlOrPath": "Load Upscale Model (URL/Path)",
     "GeminiImage2GenAI": "Nano Banana Pro (Google Gemini Image - Python)",
     "PasteImageByMask": "Paste Image By Mask",
+    "CutImageByMask": "Cut Image By Mask",
 }
 
 # Conditionally load nunchaku node if module is available
