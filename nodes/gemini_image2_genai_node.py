@@ -1,5 +1,6 @@
 import base64
 from io import BytesIO
+from urllib.request import urlopen
 
 import numpy as np
 import torch
@@ -63,6 +64,23 @@ def _append_gemini_file_parts(contents, files):
                 continue
 
 
+def _decode_image_part(part):
+    inline_data = getattr(part, "inline_data", None) or getattr(part, "inlineData", None)
+    if inline_data and getattr(inline_data, "data", None):
+        data = inline_data.data
+        if isinstance(data, str):
+            data = base64.b64decode(data)
+        return Image.open(BytesIO(data)).convert("RGB")
+
+    file_data = getattr(part, "file_data", None) or getattr(part, "fileData", None)
+    if file_data:
+        file_uri = getattr(file_data, "file_uri", None) or getattr(file_data, "fileUri", None)
+        if file_uri:
+            with urlopen(file_uri) as response:
+                return Image.open(BytesIO(response.read())).convert("RGB")
+    return None
+
+
 def _build_genai_config(seed, response_modalities, aspect_ratio, resolution):
     try:
         from google.genai import types as genai_types
@@ -75,7 +93,8 @@ def _build_genai_config(seed, response_modalities, aspect_ratio, resolution):
             ["IMAGE"] if response_modalities == "IMAGE" else ["TEXT", "IMAGE"]
         )
     if seed is not None:
-        config_kwargs["seed"] = seed
+        # GenAI expects a 32-bit signed int for seed.
+        config_kwargs["seed"] = int(seed) % (2**31 - 1)
 
     if aspect_ratio != "auto" or resolution:
         image_config_kwargs = {}
@@ -105,7 +124,7 @@ class GeminiImage2GenAI:
             "required": {
                 "prompt": ("STRING", {"default": "", "multiline": True}),
                 "model": (["gemini-3-pro-image-preview"],),
-                "seed": ("INT", {"default": 42, "min": 0, "max": 0xFFFFFFFFFFFFFFFF}),
+                "seed": ("INT", {"default": 42, "min": 0, "max": 0x7FFFFFFF}),
                 "aspect_ratio": (["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],),
                 "resolution": (["1K", "2K", "4K"],),
                 "response_modalities": (["IMAGE+TEXT", "IMAGE"],),
@@ -178,18 +197,14 @@ class GeminiImage2GenAI:
         output_images = []
         output_texts = []
         for part in parts:
-            inline_data = getattr(part, "inline_data", None) or getattr(part, "inlineData", None)
-            if inline_data:
-                try:
-                    image = part.as_image()
-                    output_images.append(_pil_to_tensor(image))
-                except Exception:
-                    pass
+            image = _decode_image_part(part)
+            if image is not None:
+                output_images.append(_pil_to_tensor(image))
             if getattr(part, "text", None):
                 output_texts.append(part.text)
 
         if not output_images:
-            output_images = [torch.zeros((1, 1024, 1024, 3), dtype=torch.float32)]
+            raise ValueError("Gemini returned no image parts. Try IMAGE+TEXT for debugging output.")
 
         output_text = "\n".join(output_texts).strip()
         return (torch.cat(output_images, dim=0), output_text)
