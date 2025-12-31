@@ -117,6 +117,18 @@ def _build_genai_config(seed, response_modalities, aspect_ratio, resolution):
         return None
 
 
+def _log_usage_metadata(response):
+    usage = getattr(response, "usage_metadata", None) or getattr(response, "usageMetadata", None)
+    if not usage:
+        return
+    prompt_tokens = getattr(usage, "prompt_token_count", None) or getattr(usage, "promptTokenCount", None)
+    candidates_tokens = getattr(usage, "candidates_token_count", None) or getattr(
+        usage, "candidatesTokenCount", None
+    )
+    total_tokens = getattr(usage, "total_token_count", None) or getattr(usage, "totalTokenCount", None)
+    print(f"Gemini usage: prompt={prompt_tokens}, candidates={candidates_tokens}, total={total_tokens}")
+
+
 class GeminiImage2GenAI:
     @classmethod
     def INPUT_TYPES(cls):
@@ -186,6 +198,8 @@ class GeminiImage2GenAI:
             response = client.models.generate_content(model=model, contents=contents, config=config)
         else:
             response = client.models.generate_content(model=model, contents=contents)
+
+        _log_usage_metadata(response)
 
         parts = getattr(response, "parts", None)
         if parts is None and getattr(response, "candidates", None):
