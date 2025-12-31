@@ -81,7 +81,7 @@ def _decode_image_part(part):
     return None
 
 
-def _build_genai_config(seed, response_modalities, aspect_ratio, resolution):
+def _build_genai_config(seed, response_modalities, aspect_ratio, resolution, model):
     try:
         from google.genai import types as genai_types
     except Exception:
@@ -96,11 +96,11 @@ def _build_genai_config(seed, response_modalities, aspect_ratio, resolution):
         # GenAI expects a 32-bit signed int for seed.
         config_kwargs["seed"] = int(seed) % (2**31 - 1)
 
-    if aspect_ratio != "auto" or resolution:
+    if aspect_ratio != "auto" or (resolution and model != "gemini-2.5-flash-image"):
         image_config_kwargs = {}
         if aspect_ratio != "auto":
             image_config_kwargs["aspect_ratio"] = aspect_ratio
-        if resolution:
+        if resolution and model != "gemini-2.5-flash-image":
             image_config_kwargs["image_size"] = resolution
         if image_config_kwargs and hasattr(genai_types, "ImageConfig"):
             try:
@@ -135,7 +135,7 @@ class GeminiImage2GenAI:
         return {
             "required": {
                 "prompt": ("STRING", {"default": "", "multiline": True}),
-                "model": (["gemini-3-pro-image-preview"],),
+                "model": (["gemini-3-pro-image-preview", "gemini-2.5-flash-image"],),
                 "seed": ("INT", {"default": 42, "min": 0, "max": 0x7FFFFFFF}),
                 "aspect_ratio": (["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],),
                 "resolution": (["1K", "2K", "4K"],),
@@ -193,7 +193,7 @@ class GeminiImage2GenAI:
         _append_gemini_file_parts(contents, files)
 
         client = genai.Client(api_key=gemini_key)
-        config = _build_genai_config(seed, response_modalities, aspect_ratio, resolution)
+        config = _build_genai_config(seed, response_modalities, aspect_ratio, resolution, model)
         if config is not None:
             response = client.models.generate_content(model=model, contents=contents, config=config)
         else:
