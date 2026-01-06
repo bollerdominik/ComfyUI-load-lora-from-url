@@ -3,6 +3,7 @@ from .nodes.load_video_lora_url_node import LoadVideoLoraByUrlOrPath, LoadVideoL
 from .nodes.load_video_url_node import LoadVideoByUrlOrPath
 from .nodes.load_upscale_model_url_node import LoadUpscaleModelByUrlOrPath
 from .nodes.gemini_image2_genai_node import GeminiImage2GenAI
+from .nodes.openrouter_gemini_image_node import OpenRouterGeminiImage
 from .nodes.paste_image_by_mask_node import PasteImageByMask
 from .nodes.cut_image_by_mask_node import CutImageByMask
 
@@ -13,6 +14,7 @@ NODE_CLASS_MAPPINGS = {
     "LoadVideoFromUrlOrPath": LoadVideoByUrlOrPath,
     "LoadUpscaleModelFromUrlOrPath": LoadUpscaleModelByUrlOrPath,
     "GeminiImage2GenAI": GeminiImage2GenAI,
+    "OpenRouterGeminiImage": OpenRouterGeminiImage,
     "PasteImageByMask": PasteImageByMask,
     "CutImageByMask": CutImageByMask,
 }
@@ -24,6 +26,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LoadVideoFromUrlOrPath": "Load Video (URL/Path)",
     "LoadUpscaleModelFromUrlOrPath": "Load Upscale Model (URL/Path)",
     "GeminiImage2GenAI": "Nano Banana Pro (Google Gemini Image - Python)",
+    "OpenRouterGeminiImage": "Nano Banana Pro (OpenRouter Gemini Image)",
     "PasteImageByMask": "Paste Image By Mask",
     "CutImageByMask": "Cut Image By Mask",
 }
