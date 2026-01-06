@@ -94,7 +94,7 @@ class OpenRouterGeminiImage:
         return {
             "required": {
                 "prompt": ("STRING", {"default": "", "multiline": True}),
-                "model": (["google/gemini-2.5-flash-image-preview", "google/gemini-3-pro-image-preview"],),
+                "model": (["google/gemini-2.5-flash-image-preview:nitro", "google/gemini-3-pro-image-preview:nitro"],),
                 "seed": ("INT", {"default": 42, "min": 0, "max": 0x7FFFFFFF}),
                 "aspect_ratio": (["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],),
                 "resolution": (["1K", "2K", "4K"],),
