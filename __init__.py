@@ -6,6 +6,8 @@ from .nodes.gemini_image2_genai_node import GeminiImage2GenAI
 from .nodes.openrouter_gemini_image_node import OpenRouterGeminiImage
 from .nodes.paste_image_by_mask_node import PasteImageByMask
 from .nodes.cut_image_by_mask_node import CutImageByMask
+from .nodes.image_resize_node import ImageResize
+from .nodes.simple_math_node import SimpleMath
 
 NODE_CLASS_MAPPINGS = {
     "LoadLoraFromUrlOrPath": LoadLoraByUrlOrPath,
@@ -17,6 +19,8 @@ NODE_CLASS_MAPPINGS = {
     "OpenRouterGeminiImage": OpenRouterGeminiImage,
     "PasteImageByMask": PasteImageByMask,
     "CutImageByMask": CutImageByMask,
+    "ImageResize+": ImageResize,
+    "SimpleMath+": SimpleMath,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -29,6 +33,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "OpenRouterGeminiImage": "Nano Banana Pro (OpenRouter Gemini Image)",
     "PasteImageByMask": "Paste Image By Mask",
     "CutImageByMask": "Cut Image By Mask",
+    "ImageResize+": "🔧 Image Resize",
+    "SimpleMath+": "🔧 Simple Math",
 }
 
 # Conditionally load nunchaku node if module is available
