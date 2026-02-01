@@ -1,0 +1,14 @@
+[project]
+name = "load-lora-from-url"
+description = "A simple node to load image from local path or http url."
+version = "1.0.0"
+license = {file = "LICENSE"}
+
+[project.urls]
+Repository = "https://github.com/bollerdominik/ComfyUI-load-lora-from-url"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "ComfyUI-load-lora-from-url"
+Icon = ""
