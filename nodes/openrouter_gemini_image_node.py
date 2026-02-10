@@ -209,7 +209,11 @@ class OpenRouterGeminiImage:
                         output_texts.append(item.get("text", ""))
 
         if not output_images:
+            print(f"OpenRouter full response (no images): {result}")
             raise ValueError("OpenRouter returned no image data. Try IMAGE+TEXT for debugging output.")
+
+        if len(output_images) > 1:
+            print(f"Warning: OpenRouter returned {len(output_images)} images, using only the first one.")
 
         output_text = "\n".join(output_texts).strip()
 
@@ -219,4 +223,4 @@ class OpenRouterGeminiImage:
                   f"completion={usage.get('completion_tokens')}, "
                   f"total={usage.get('total_tokens')}")
 
-        return (torch.cat(output_images, dim=0), output_text)
+        return (output_images[0], output_text)
