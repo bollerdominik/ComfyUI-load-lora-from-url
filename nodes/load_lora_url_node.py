@@ -189,7 +189,7 @@ class LoadLoraByUrlOrPath:
                 with open(self.history_file, 'r') as f:
                     history = json.load(f)
                     print(f"Loaded LoRA history: {len(history)} entries")
-                    print(f"History content: {json.dumps(history, indent=2)}")
+                    # print(f"History content: {json.dumps(history, indent=2)}")
                     return history
             except Exception as e:
                 print(f"Error loading history file: {e}")

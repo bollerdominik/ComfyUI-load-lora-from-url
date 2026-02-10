@@ -8,6 +8,7 @@ from .nodes.paste_image_by_mask_node import PasteImageByMask
 from .nodes.cut_image_by_mask_node import CutImageByMask
 from .nodes.image_resize_node import ImageResize
 from .nodes.simple_math_node import SimpleMath
+from .nodes.assert_not_black_node import AssertNotBlack
 
 NODE_CLASS_MAPPINGS = {
     "LoadLoraFromUrlOrPath": LoadLoraByUrlOrPath,
@@ -21,6 +22,7 @@ NODE_CLASS_MAPPINGS = {
     "CutImageByMask": CutImageByMask,
     "ImageResize+": ImageResize,
     "SimpleMath+": SimpleMath,
+    "AssertNotBlack": AssertNotBlack,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -35,6 +37,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CutImageByMask": "Cut Image By Mask",
     "ImageResize+": "🔧 Image Resize",
     "SimpleMath+": "🔧 Simple Math",
+    "AssertNotBlack": "Assert Not Black",
 }
 
 # Conditionally load nunchaku node if module is available
