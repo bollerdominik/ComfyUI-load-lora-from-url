@@ -5,6 +5,7 @@ import folder_paths
 import cv2
 import numpy as np
 import torch
+import av
 from comfy.comfy_types import ComfyNodeABC
 
 
@@ -54,8 +55,8 @@ class LoadVideoByUrlOrPath(ComfyNodeABC):
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "FLOAT")
-    RETURN_NAMES = ("frames", "fps")
+    RETURN_TYPES = ("IMAGE", "FLOAT", "AUDIO")
+    RETURN_NAMES = ("frames", "fps", "audio")
     FUNCTION = "load"
     CATEGORY = "image/video"
 
@@ -94,11 +95,45 @@ class LoadVideoByUrlOrPath(ComfyNodeABC):
 
         return frames_tensor, float(fps)
 
+    def extract_audio(self, video_path):
+        """Extract audio from video and return as ComfyUI AUDIO dict, or None if no audio."""
+        try:
+            with av.open(video_path) as container:
+                if not container.streams.audio:
+                    return None
+
+                stream = container.streams.audio[0]
+                sample_rate = stream.codec_context.sample_rate
+                n_channels = stream.channels
+
+                audio_frames = []
+                for frame in container.decode(streams=stream.index):
+                    buf = torch.from_numpy(frame.to_ndarray())
+                    if buf.shape[0] != n_channels:
+                        buf = buf.view(-1, n_channels).t()
+                    audio_frames.append(buf)
+
+                if not audio_frames:
+                    return None
+
+                waveform = torch.cat(audio_frames, dim=1)
+                # Convert to float32 PCM
+                if not waveform.dtype.is_floating_point:
+                    if waveform.dtype == torch.int16:
+                        waveform = waveform.float() / (2 ** 15)
+                    elif waveform.dtype == torch.int32:
+                        waveform = waveform.float() / (2 ** 31)
+
+                return {"waveform": waveform.unsqueeze(0), "sample_rate": sample_rate}
+        except Exception:
+            return None
+
     def load(self, url_or_path):
         print(f"Loading video from: {url_or_path}")
         video_path, name = load_video(url_or_path)
         frames, fps = self.extract_frames(video_path)
-        return (frames, fps)
+        audio = self.extract_audio(video_path)
+        return (frames, fps, audio)
 
 
 if __name__ == "__main__":
