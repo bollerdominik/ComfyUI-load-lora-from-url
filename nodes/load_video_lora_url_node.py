@@ -25,8 +25,8 @@ class LoadVideoLoraByUrlOrPath:
 
         # Network volume settings
         self.network_volume_path = "/workspace/network-volume"  # Path to check for network volume
-        self.network_volume_free_space_threshold_gb = 300  # If free space > this, consider unreliable
-        self.network_volume_max_size_gb = 190  # Maximum total size for network volumes
+        self.network_volume_free_space_threshold_gb = 400  # If free space > this, consider unreliable
+        self.network_volume_max_size_gb = 270  # Maximum total size for network volumes
 
         # Initialize LoraLoader for applying LoRAs
         self.lora_loader = LoraLoader()
@@ -391,8 +391,8 @@ class LoadVideoLoraByUrlOrPathSelect:
 
         # Network volume settings
         self.network_volume_path = "/workspace/network-volume"  # Path to check for network volume
-        self.network_volume_free_space_threshold_gb = 300  # If free space > this, consider unreliable
-        self.network_volume_max_size_gb = 190  # Maximum total size for network volumes
+        self.network_volume_free_space_threshold_gb = 400  # If free space > this, consider unreliable
+        self.network_volume_max_size_gb = 270  # Maximum total size for network volumes
 
     @classmethod
     def INPUT_TYPES(s):
