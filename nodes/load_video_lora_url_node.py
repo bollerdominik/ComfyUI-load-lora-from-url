@@ -21,7 +21,7 @@ class LoadVideoLoraByUrlOrPath:
         self.min_free_space_gb = 2  # Minimum free space in GB
 
         # Protected LoRAs that should never be deleted
-        self.protected_keywords = ["lightning"]  # Case insensitive matching
+        self.protected_keywords = ["lightning", "distilled"]  # Case insensitive matching
 
         # Network volume settings
         self.network_volume_path = "/workspace/network-volume"  # Path to check for network volume
@@ -387,7 +387,7 @@ class LoadVideoLoraByUrlOrPathSelect:
         self.min_free_space_gb = 2  # Minimum free space in GB
 
         # Protected LoRAs that should never be deleted
-        self.protected_keywords = ["lightning"]  # Case insensitive matching
+        self.protected_keywords = ["lightning", "distilled"]  # Case insensitive matching
 
         # Network volume settings
         self.network_volume_path = "/workspace/network-volume"  # Path to check for network volume
