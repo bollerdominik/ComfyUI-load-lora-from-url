@@ -81,6 +81,7 @@ class BytePlusVideoGeneration:
                 "model": ("STRING", {"default": "ep-20260423190508-bhljb", "multiline": False}),
                 "text": ("STRING", {"default": "my text", "multiline": True, "dynamicPrompts": False}),
                 "duration": ("INT", {"default": 10, "min": 1, "max": 60, "step": 1}),
+                "seed": ("INT", {"default": -1, "min": -1, "max": 4294967295, "step": 1}),
                 "camera_fixed": ("BOOLEAN", {"default": False}),
             },
             "optional": {
@@ -99,7 +100,7 @@ class BytePlusVideoGeneration:
     FUNCTION = "generate"
     CATEGORY = "image/video"
 
-    def _create_task(self, api_key, model, text, image, image_url, duration, camera_fixed, generate_audio, ratio, watermark):
+    def _create_task(self, api_key, model, text, image, image_url, duration, seed, camera_fixed, generate_audio, ratio, watermark):
         content = [{"type": "text", "text": text}]
         encoded_image_url = _tensor_to_data_url(image)
         image_url = image_url.strip()
@@ -114,6 +115,7 @@ class BytePlusVideoGeneration:
             "generate_audio": bool(generate_audio),
             "ratio": ratio,
             "duration": int(duration),
+            "seed": int(seed),
             "watermark": bool(watermark),
             "camera_fixed": bool(camera_fixed),
         }
@@ -161,6 +163,7 @@ class BytePlusVideoGeneration:
         model,
         text,
         duration,
+        seed,
         camera_fixed,
         image=None,
         image_url="",
@@ -180,6 +183,7 @@ class BytePlusVideoGeneration:
             image,
             image_url,
             duration,
+            seed,
             camera_fixed,
             generate_audio,
             ratio,
