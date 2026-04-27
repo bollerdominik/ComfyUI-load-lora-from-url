@@ -9,6 +9,7 @@ from .nodes.cut_image_by_mask_node import CutImageByMask
 from .nodes.image_resize_node import ImageResize
 from .nodes.simple_math_node import SimpleMath
 from .nodes.assert_not_black_node import AssertNotBlack
+from .nodes.byteplus_video_generation_node import BytePlusVideoGeneration
 
 NODE_CLASS_MAPPINGS = {
     "LoadLoraFromUrlOrPath": LoadLoraByUrlOrPath,
@@ -23,6 +24,7 @@ NODE_CLASS_MAPPINGS = {
     "ImageResize+": ImageResize,
     "SimpleMath+": SimpleMath,
     "AssertNotBlack": AssertNotBlack,
+    "BytePlusVideoGeneration": BytePlusVideoGeneration,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -38,6 +40,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ImageResize+": "🔧 Image Resize",
     "SimpleMath+": "🔧 Simple Math",
     "AssertNotBlack": "Assert Not Black",
+    "BytePlusVideoGeneration": "BytePlus Video Generation",
 }
 
 # Conditionally load nunchaku node if module is available
