@@ -1,9 +1,13 @@
+import base64
 import os
 import time
 import uuid
+from io import BytesIO
 
 import folder_paths
+import numpy as np
 import requests
+from PIL import Image
 
 try:
     from comfy_api.latest import InputImpl
@@ -14,6 +18,25 @@ except Exception:
 API_BASE_URL = "https://ark.ap-southeast.bytepluses.com/api/v3/contents/generations/tasks"
 TERMINAL_STATUSES = {"succeeded", "failed", "expired", "cancelled"}
 ACTIVE_STATUSES = {"queued", "running"}
+
+
+def _tensor_to_data_url(image):
+    if image is None:
+        return None
+    if image.ndim == 4:
+        image = image[0]
+
+    image = image.detach().cpu()
+    image_array = np.clip(image.numpy() * 255.0, 0, 255).astype(np.uint8)
+    if image_array.shape[-1] == 4:
+        pil_image = Image.fromarray(image_array, "RGBA").convert("RGB")
+    else:
+        pil_image = Image.fromarray(image_array, "RGB")
+
+    buffer = BytesIO()
+    pil_image.save(buffer, format="PNG")
+    base64_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{base64_image}"
 
 
 def _headers(api_key):
@@ -57,11 +80,12 @@ class BytePlusVideoGeneration:
                 "api_key": ("STRING", {"default": "", "multiline": False}),
                 "model": ("STRING", {"default": "ep-20260423190508-bhljb", "multiline": False}),
                 "text": ("STRING", {"default": "my text", "multiline": True, "dynamicPrompts": False}),
-                "image_url": ("STRING", {"default": "", "multiline": True, "dynamicPrompts": False}),
                 "duration": ("INT", {"default": 10, "min": 1, "max": 60, "step": 1}),
                 "camera_fixed": ("BOOLEAN", {"default": False}),
             },
             "optional": {
+                "image": ("IMAGE",),
+                "image_url": ("STRING", {"default": "", "multiline": True, "dynamicPrompts": False}),
                 "generate_audio": ("BOOLEAN", {"default": True}),
                 "ratio": (["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"], {"default": "adaptive"}),
                 "watermark": ("BOOLEAN", {"default": False}),
@@ -75,10 +99,13 @@ class BytePlusVideoGeneration:
     FUNCTION = "generate"
     CATEGORY = "image/video"
 
-    def _create_task(self, api_key, model, text, image_url, duration, camera_fixed, generate_audio, ratio, watermark):
+    def _create_task(self, api_key, model, text, image, image_url, duration, camera_fixed, generate_audio, ratio, watermark):
         content = [{"type": "text", "text": text}]
+        encoded_image_url = _tensor_to_data_url(image)
         image_url = image_url.strip()
-        if image_url:
+        if encoded_image_url:
+            content.append({"type": "image_url", "image_url": {"url": encoded_image_url}})
+        elif image_url:
             content.append({"type": "image_url", "image_url": {"url": image_url}})
 
         payload = {
@@ -133,9 +160,10 @@ class BytePlusVideoGeneration:
         api_key,
         model,
         text,
-        image_url,
         duration,
         camera_fixed,
+        image=None,
+        image_url="",
         generate_audio=True,
         ratio="adaptive",
         watermark=False,
@@ -149,6 +177,7 @@ class BytePlusVideoGeneration:
             api_key,
             model,
             text,
+            image,
             image_url,
             duration,
             camera_fixed,
