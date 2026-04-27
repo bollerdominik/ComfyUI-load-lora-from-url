@@ -89,6 +89,7 @@ class BytePlusVideoGeneration:
                 "image_url": ("STRING", {"default": "", "multiline": True, "dynamicPrompts": False}),
                 "generate_audio": ("BOOLEAN", {"default": True}),
                 "ratio": (["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"], {"default": "adaptive"}),
+                "resolution": (["480p", "720p"], {"default": "480p"}),
                 "watermark": ("BOOLEAN", {"default": False}),
                 "poll_interval_seconds": ("FLOAT", {"default": 5.0, "min": 1.0, "max": 60.0, "step": 0.5}),
                 "timeout_seconds": ("INT", {"default": 900, "min": 30, "max": 7200, "step": 30}),
@@ -100,7 +101,7 @@ class BytePlusVideoGeneration:
     FUNCTION = "generate"
     CATEGORY = "image/video"
 
-    def _create_task(self, api_key, model, text, image, image_url, duration, seed, camera_fixed, generate_audio, ratio, watermark):
+    def _create_task(self, api_key, model, text, image, image_url, duration, seed, camera_fixed, generate_audio, ratio, resolution, watermark):
         content = [{"type": "text", "text": text}]
         encoded_image_url = _tensor_to_data_url(image)
         image_url = image_url.strip()
@@ -114,6 +115,7 @@ class BytePlusVideoGeneration:
             "content": content,
             "generate_audio": bool(generate_audio),
             "ratio": ratio,
+            "resolution": resolution,
             "duration": int(duration),
             "seed": int(seed),
             "watermark": bool(watermark),
@@ -169,6 +171,7 @@ class BytePlusVideoGeneration:
         image_url="",
         generate_audio=True,
         ratio="adaptive",
+        resolution="480p",
         watermark=False,
         poll_interval_seconds=5.0,
         timeout_seconds=900,
@@ -187,6 +190,7 @@ class BytePlusVideoGeneration:
             camera_fixed,
             generate_audio,
             ratio,
+            resolution,
             watermark,
         )
         video_url = self._poll_task(api_key, task_id, poll_interval_seconds, timeout_seconds)
