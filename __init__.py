@@ -1,6 +1,5 @@
 from .nodes.load_lora_url_node import LoadLoraByUrlOrPath
 from .nodes.load_video_lora_url_node import LoadVideoLoraByUrlOrPath, LoadVideoLoraByUrlOrPathSelect
-from .nodes.load_video_url_node import LoadVideoByUrlOrPath
 from .nodes.load_upscale_model_url_node import LoadUpscaleModelByUrlOrPath
 from .nodes.gemini_image2_genai_node import GeminiImage2GenAI
 from .nodes.openrouter_gemini_image_node import OpenRouterGeminiImage
@@ -15,7 +14,6 @@ NODE_CLASS_MAPPINGS = {
     "LoadLoraFromUrlOrPath": LoadLoraByUrlOrPath,
     "LoadVideoLoraFromUrlOrPath": LoadVideoLoraByUrlOrPath,
     "LoadVideoLoraFromUrlOrPathSelect": LoadVideoLoraByUrlOrPathSelect,
-    "LoadVideoFromUrlOrPath": LoadVideoByUrlOrPath,
     "LoadUpscaleModelFromUrlOrPath": LoadUpscaleModelByUrlOrPath,
     "GeminiImage2GenAI": GeminiImage2GenAI,
     "OpenRouterGeminiImage": OpenRouterGeminiImage,
@@ -31,7 +29,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LoadLoraFromUrlOrPath": "Load LoRA (URL/Path) to Stack",
     "LoadVideoLoraFromUrlOrPath": "Load Video LoRA (URL/Path) & Apply",
     "LoadVideoLoraFromUrlOrPathSelect": "Load Video LoRA (URL/Path) Wan",
-    "LoadVideoFromUrlOrPath": "Load Video (URL/Path)",
     "LoadUpscaleModelFromUrlOrPath": "Load Upscale Model (URL/Path)",
     "GeminiImage2GenAI": "Nano Banana Pro (Google Gemini Image - Python)",
     "OpenRouterGeminiImage": "Nano Banana Pro (OpenRouter Gemini Image)",
@@ -49,5 +46,15 @@ try:
     from .nodes.load_nunchaku_lora_url_node import LoadNunchakuLoraFromUrlOrPath
     NODE_CLASS_MAPPINGS["LoadNunchakuLoraFromUrlOrPath"] = LoadNunchakuLoraFromUrlOrPath
     NODE_DISPLAY_NAME_MAPPINGS["LoadNunchakuLoraFromUrlOrPath"] = "Nunchaku FLUX LoRA Loader (URL/Path)"
+except ImportError:
+    pass
+
+# Conditionally load video URL node if cv2 (opencv) and av are available
+try:
+    import cv2  # noqa: F401
+    import av  # noqa: F401
+    from .nodes.load_video_url_node import LoadVideoByUrlOrPath
+    NODE_CLASS_MAPPINGS["LoadVideoFromUrlOrPath"] = LoadVideoByUrlOrPath
+    NODE_DISPLAY_NAME_MAPPINGS["LoadVideoFromUrlOrPath"] = "Load Video (URL/Path)"
 except ImportError:
     pass
