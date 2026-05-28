@@ -135,9 +135,17 @@ class BytePlusVideoGeneration:
         poll_url = f"{API_BASE_URL}/{task_id}"
 
         while True:
-            response = requests.get(poll_url, headers=_headers(api_key), timeout=120)
-            _raise_for_api_error(response, "task polling")
-            data = response.json()
+            try:
+                response = requests.get(poll_url, headers=_headers(api_key), timeout=120)
+                _raise_for_api_error(response, "task polling")
+                data = response.json()
+            except (requests.ConnectionError, requests.Timeout) as exc:
+                print(f"BytePlus video task {task_id}: poll connection error, retrying: {exc}")
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Timed out waiting for BytePlus task {task_id} after {timeout_seconds} seconds.") from exc
+                time.sleep(float(poll_interval_seconds))
+                continue
+
             status = data.get("status")
 
             print(f"BytePlus video task {task_id}: {status}")
