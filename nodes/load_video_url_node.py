@@ -55,13 +55,13 @@ class LoadVideoByUrlOrPath(ComfyNodeABC):
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "FLOAT", "AUDIO")
-    RETURN_NAMES = ("frames", "fps", "audio")
+    RETURN_TYPES = ("IMAGE", "FLOAT", "AUDIO", "VHS_VIDEOINFO")
+    RETURN_NAMES = ("frames", "fps", "audio", "video_info")
     FUNCTION = "load"
     CATEGORY = "image/video"
 
     def extract_frames(self, video_path):
-        """Extract frames from video and return as torch tensor along with fps"""
+        """Extract frames from video and return as torch tensor along with fps and metadata"""
         video_cap = cv2.VideoCapture(video_path)
         if not video_cap.isOpened():
             raise ValueError(f"Could not open video file: {video_path}")
@@ -69,6 +69,8 @@ class LoadVideoByUrlOrPath(ComfyNodeABC):
         # Get video properties
         fps = video_cap.get(cv2.CAP_PROP_FPS)
         total_frames = int(video_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        width = int(video_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(video_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
         frames = []
         frame_count = 0
@@ -93,7 +95,14 @@ class LoadVideoByUrlOrPath(ComfyNodeABC):
         # Convert to torch tensor with shape [num_frames, height, width, channels]
         frames_tensor = torch.from_numpy(np.stack(frames))
 
-        return frames_tensor, float(fps)
+        meta = {
+            "fps": float(fps),
+            "total_frames": total_frames,
+            "width": width,
+            "height": height,
+        }
+
+        return frames_tensor, float(fps), meta
 
     def extract_audio(self, video_path):
         """Extract audio from video and return as ComfyUI AUDIO dict, or None if no audio."""
@@ -131,9 +140,28 @@ class LoadVideoByUrlOrPath(ComfyNodeABC):
     def load(self, url_or_path):
         print(f"Loading video from: {url_or_path}")
         video_path, name = load_video(url_or_path)
-        frames, fps = self.extract_frames(video_path)
+        frames, fps, meta = self.extract_frames(video_path)
         audio = self.extract_audio(video_path)
-        return (frames, fps, audio)
+
+        # Build VHS_VIDEOINFO dict in the same format as comfyui-videohelpersuite.
+        # This node loads every frame at native resolution, so loaded_* mirrors source_*
+        # (loaded_frame_count is the count actually decoded).
+        loaded_frame_count = int(frames.shape[0])
+        source_duration = meta["total_frames"] / meta["fps"] if meta["fps"] else 0
+        loaded_duration = loaded_frame_count / fps if fps else 0
+        video_info = {
+            "source_fps": meta["fps"],
+            "source_frame_count": meta["total_frames"],
+            "source_duration": source_duration,
+            "source_width": meta["width"],
+            "source_height": meta["height"],
+            "loaded_fps": fps,
+            "loaded_frame_count": loaded_frame_count,
+            "loaded_duration": loaded_duration,
+            "loaded_width": meta["width"],
+            "loaded_height": meta["height"],
+        }
+        return (frames, fps, audio, video_info)
 
 
 if __name__ == "__main__":
