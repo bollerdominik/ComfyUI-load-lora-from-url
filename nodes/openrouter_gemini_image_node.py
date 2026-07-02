@@ -94,7 +94,7 @@ class OpenRouterGeminiImage:
         return {
             "required": {
                 "prompt": ("STRING", {"default": "", "multiline": True}),
-                "model": (["google/gemini-2.5-flash-image-preview:nitro", "google/gemini-3-pro-image-preview:nitro", "google/gemini-3.1-flash-image-preview:nitro"],),
+                "model": (["google/gemini-2.5-flash-image-preview:nitro", "google/gemini-3-pro-image-preview:nitro", "google/gemini-3.1-flash-image-preview:nitro", "bytedance-seed/seedream-4.5"],),
                 "seed": ("INT", {"default": 42, "min": 0, "max": 0x7FFFFFFF}),
                 "aspect_ratio": (["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],),
                 "resolution": (["1K", "2K", "4K"],),
@@ -105,6 +105,7 @@ class OpenRouterGeminiImage:
                 "images": ("IMAGE",),
                 "files": ("GEMINI_INPUT_FILES",),
                 "system_prompt": ("STRING", {"default": GEMINI_IMAGE_SYS_PROMPT, "multiline": True}),
+                "custom_model": ("STRING", {"default": "", "multiline": False, "tooltip": "Overrides the model dropdown when set, e.g. bytedance-seed/seedream-4.5"}),
             },
         }
 
@@ -125,7 +126,10 @@ class OpenRouterGeminiImage:
         images=None,
         files=None,
         system_prompt="",
+        custom_model="",
     ):
+        if custom_model and custom_model.strip():
+            model = custom_model.strip()
         if not prompt or not prompt.strip():
             raise ValueError("Prompt is required.")
         if not openrouter_key:
