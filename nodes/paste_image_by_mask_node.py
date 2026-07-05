@@ -2,7 +2,20 @@ import torch
 import torch.nn.functional as F
 
 
-FEATHER_KERNEL = 7
+def _feather_mask(mask_2d, feather):
+    if feather <= 0:
+        return mask_2d
+    kernel = 2 * feather + 1
+    m = mask_2d.unsqueeze(0).unsqueeze(0)
+    # the blend must ramp inward: compositing is clipped to the mask's
+    # bounding box, so any falloff outside the mask gets truncated into
+    # a hard edge. Erode first so the blurred ramp ends at the original
+    # mask border instead of spilling past it.
+    eroded = -F.max_pool2d(-m, kernel_size=kernel, stride=1, padding=feather)
+    if eroded.max() > 0:
+        m = eroded
+    softened = F.avg_pool2d(m, kernel_size=kernel, stride=1, padding=feather)[0, 0]
+    return torch.minimum(softened, mask_2d)
 
 
 def _ensure_batch(tensor, batch_size):
@@ -48,7 +61,10 @@ class PasteImageByMask:
                 "source_image": ("IMAGE",),
                 "cropped_image": ("IMAGE",),
                 "mask": ("MASK",),
-            }
+            },
+            "optional": {
+                "feather": ("INT", {"default": 3, "min": 0, "max": 256, "tooltip": "Blend width in pixels at the mask edge. 0 = hard paste."}),
+            },
         }
 
     RETURN_TYPES = ("IMAGE",)
@@ -56,7 +72,7 @@ class PasteImageByMask:
     FUNCTION = "execute"
     CATEGORY = "image/compose"
 
-    def execute(self, source_image, cropped_image, mask):
+    def execute(self, source_image, cropped_image, mask, feather=3):
         if source_image.ndim != 4 or cropped_image.ndim != 4:
             raise ValueError("Expected IMAGE tensors with shape [B,H,W,C].")
 
@@ -96,12 +112,7 @@ class PasteImageByMask:
             resized = F.interpolate(crop_i, size=(target_h, target_w), mode="nearest")
             resized = resized.squeeze(0).permute(1, 2, 0)
 
-            softened = F.avg_pool2d(
-                mask_i.unsqueeze(0).unsqueeze(0),
-                kernel_size=FEATHER_KERNEL,
-                stride=1,
-                padding=FEATHER_KERNEL // 2,
-            )[0, 0]
+            softened = _feather_mask(mask_i, feather)
             alpha = softened[ymin : ymax + 1, xmin : xmax + 1].unsqueeze(-1)
             base_region = result[i, ymin : ymax + 1, xmin : xmax + 1, :]
             result[i, ymin : ymax + 1, xmin : xmax + 1, :] = resized * alpha + base_region * (1.0 - alpha)
