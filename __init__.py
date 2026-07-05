@@ -9,6 +9,7 @@ from .nodes.image_resize_node import ImageResize
 from .nodes.simple_math_node import SimpleMath
 from .nodes.assert_not_black_node import AssertNotBlack
 from .nodes.byteplus_video_generation_node import BytePlusVideoGeneration
+from .nodes.square_mask_region_node import SquareMaskRegion
 
 NODE_CLASS_MAPPINGS = {
     "LoadLoraFromUrlOrPath": LoadLoraByUrlOrPath,
@@ -23,6 +24,7 @@ NODE_CLASS_MAPPINGS = {
     "SimpleMath+": SimpleMath,
     "AssertNotBlack": AssertNotBlack,
     "BytePlusVideoGeneration": BytePlusVideoGeneration,
+    "SquareMaskRegion": SquareMaskRegion,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -38,6 +40,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SimpleMath+": "🔧 Simple Math",
     "AssertNotBlack": "Assert Not Black",
     "BytePlusVideoGeneration": "BytePlus Video Generation",
+    "SquareMaskRegion": "Square Mask Region",
 }
 
 # Conditionally load nunchaku node if module is available
