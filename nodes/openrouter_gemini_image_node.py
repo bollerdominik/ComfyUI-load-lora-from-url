@@ -172,7 +172,20 @@ class OpenRouterGeminiImage:
             response = requests.post(url, headers=headers, json=payload, timeout=300)
             response.raise_for_status()
         except requests.exceptions.RequestException as exc:
-            raise RuntimeError(f"OpenRouter API request failed: {exc}") from exc
+            response_obj = getattr(exc, "response", None)
+            body_text = ""
+            if response_obj is not None:
+                try:
+                    body_text = response_obj.text
+                except Exception:
+                    body_text = "<unable to read response body>"
+                print(f"OpenRouter API error status: {response_obj.status_code}")
+                print(f"OpenRouter API error response body: {body_text}")
+            print(f"OpenRouter request payload model={payload.get('model')}, "
+                  f"modalities={payload.get('modalities')}, "
+                  f"image_config={payload.get('image_config')}")
+            detail = f": {body_text}" if body_text else ""
+            raise RuntimeError(f"OpenRouter API request failed: {exc}{detail}") from exc
 
         result = response.json()
 
