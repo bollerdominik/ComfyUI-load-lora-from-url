@@ -109,8 +109,14 @@ class PasteImageByMask:
             target_w = xmax - xmin + 1
 
             crop_i = cropped[i].permute(2, 0, 1).unsqueeze(0)
-            resized = F.interpolate(crop_i, size=(target_h, target_w), mode="nearest")
-            resized = resized.squeeze(0).permute(1, 2, 0)
+            crop_h, crop_w = crop_i.shape[-2:]
+            if target_h < crop_h or target_w < crop_w:
+                # area averaging prevents the aliasing that nearest-neighbor
+                # produces on strong downscales (e.g. 2k crop into a 400px mask)
+                resized = F.interpolate(crop_i, size=(target_h, target_w), mode="area")
+            else:
+                resized = F.interpolate(crop_i, size=(target_h, target_w), mode="bilinear", align_corners=False)
+            resized = resized.squeeze(0).permute(1, 2, 0).clamp(0.0, 1.0)
 
             softened = _feather_mask(mask_i, feather)
             alpha = softened[ymin : ymax + 1, xmin : xmax + 1].unsqueeze(-1)
