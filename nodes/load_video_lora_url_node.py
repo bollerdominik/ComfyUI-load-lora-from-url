@@ -4,10 +4,19 @@ import os
 import shutil
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import folder_paths
 import requests
 from nodes import LoraLoader  # Import LoraLoader for applying LoRAs
+
+
+# Raised when a server that looked range-capable answers a ranged GET with
+# something other than 206 (plain 200, or the file changed under If-Range).
+# Bytes written at segment offsets can then not be trusted, so the download
+# falls back to a fresh single-stream fetch.
+class _RangeNotSupported(Exception):
+    pass
 
 
 # Shared download/cache/disk-management logic for the LoRA-from-URL nodes below.
@@ -18,6 +27,9 @@ from nodes import LoraLoader  # Import LoraLoader for applying LoRAs
 class LoraDownloadManagerBase:
     DOWNLOAD_TIMEOUT = (10, 120)  # (connect, read) timeout in seconds
     DOWNLOAD_RETRIES = 3
+    DOWNLOAD_CONNECTIONS = 4  # parallel connections for segmented downloads
+    SEGMENTED_MIN_SIZE = 32 * 1024 * 1024  # segment only files at least this big
+    DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 
     def __init__(self):
         # Initialize lora folder path
@@ -61,24 +73,13 @@ class LoraDownloadManagerBase:
             print(f"Existing LoRA file {filename} was invalid and removed, re-downloading...")
 
         if url.startswith('http'):
-            last_error = None
-            for attempt in range(1, self.DOWNLOAD_RETRIES + 1):
-                try:
-                    print(f"Downloading LoRA from {url} (attempt {attempt}/{self.DOWNLOAD_RETRIES})")
-                    self._download_to_path(url, full_path)
-                    print(f"Downloaded LoRA to {full_path}")
-                    self._update_lora_usage(filename)
-                    return filename
-                except Exception as e:
-                    last_error = e
-                    print(f"LoRA download attempt {attempt} failed: {e}")
-                    # Client errors (404, 403, ...) won't succeed on retry
-                    if isinstance(e, requests.HTTPError) and e.response is not None \
-                            and 400 <= e.response.status_code < 500:
-                        break
-                    if attempt < self.DOWNLOAD_RETRIES:
-                        time.sleep(2 * attempt)
-            raise RuntimeError(f"Failed to download LoRA from {url}: {last_error}")
+            try:
+                self._download_to_path(url, full_path)
+            except Exception as e:
+                raise RuntimeError(f"Failed to download LoRA from {url}: {e}")
+            print(f"Downloaded LoRA to {full_path}")
+            self._update_lora_usage(filename)
+            return filename
         else:
             if not os.path.exists(url):
                 raise RuntimeError(f"Local LoRA file {url} does not exist")
@@ -98,38 +99,213 @@ class LoraDownloadManagerBase:
             return filename
 
     def _download_to_path(self, url, full_path):
-        """Stream url to a temp file, verify it, then atomically move it into place.
+        """Download url to a temp file, verify it, then atomically move it into place.
 
-        The final path is only ever written by os.replace() of a fully
-        validated file, so an interrupted download can never leave a corrupt
-        file where the cache check would find it.
+        Uses several parallel range requests when the server supports them
+        (single connections are often per-connection throttled), and resumes
+        partial data on retry instead of restarting from zero. Every ranged
+        request carries If-Range with the validator captured at probe time, so
+        a file that changes on the server mid-download can never be stitched
+        together from mismatched pieces. The final path is only ever written
+        by os.replace() of a fully validated file, so an interrupted download
+        can never leave a corrupt file where the cache check would find it.
         """
         tmp_path = f"{full_path}.{uuid.uuid4().hex}.part"
         try:
-            response = requests.get(url, stream=True, timeout=self.DOWNLOAD_TIMEOUT)
-            response.raise_for_status()  # Raise an exception for HTTP errors
+            force_single = False  # set when the server turns out not to honor Range
+            tmp_resumable = False  # tmp_path holds a single-stream partial download
+            attempt = 0
+            while True:
+                attempt += 1
+                try:
+                    print(f"Downloading LoRA from {url} (attempt {attempt}/{self.DOWNLOAD_RETRIES})")
+                    total_size, supports_ranges, validator = self._probe(url)
+                    if force_single:
+                        supports_ranges = False
 
-            expected_size = int(response.headers.get('content-length', 0))
-            if expected_size:
-                print(f"File size: {expected_size / (1024 * 1024):.2f} MB")
-            else:
-                print("File size: unknown")
+                    if supports_ranges and total_size >= self.SEGMENTED_MIN_SIZE \
+                            and self.DOWNLOAD_CONNECTIONS > 1:
+                        # Segmented mode writes at fixed offsets into a
+                        # preallocated file; a single-stream partial from an
+                        # earlier attempt must not be mixed into that
+                        if tmp_resumable:
+                            self._remove_quietly(tmp_path)
+                        tmp_resumable = False
+                        self._download_segmented(url, tmp_path, total_size, validator)
+                    else:
+                        resume = tmp_resumable and supports_ranges and total_size > 0
+                        if not resume:
+                            self._remove_quietly(tmp_path)
+                        tmp_resumable = True
+                        self._download_single(url, tmp_path, total_size, resume, validator)
 
-            with open(tmp_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    f.write(chunk)
+                    written = os.path.getsize(tmp_path)
+                    if total_size and written != total_size:
+                        raise IOError(f"incomplete download: got {written} of {total_size} bytes")
 
-            written = os.path.getsize(tmp_path)
-            if expected_size and written != expected_size:
-                raise IOError(f"incomplete download: got {written} of {expected_size} bytes")
+                    error = self._check_safetensors(tmp_path)
+                    if error:
+                        # Complete by size yet structurally invalid: resuming
+                        # cannot fix it, so the next attempt starts fresh
+                        self._remove_quietly(tmp_path)
+                        tmp_resumable = False
+                        raise IOError(f"downloaded file is not a valid safetensors file: {error}")
 
-            error = self._check_safetensors(tmp_path)
-            if error:
-                raise IOError(f"downloaded file is not a valid safetensors file: {error}")
-
-            os.replace(tmp_path, full_path)
+                    os.replace(tmp_path, full_path)
+                    return
+                except _RangeNotSupported as e:
+                    # Not a network failure, so it doesn't consume a retry
+                    print(f"Falling back to single-stream download: {e}")
+                    self._remove_quietly(tmp_path)
+                    tmp_resumable = False
+                    force_single = True
+                    attempt -= 1
+                except Exception as e:
+                    # Client errors (404, 403, ...) won't succeed on retry
+                    if isinstance(e, requests.HTTPError) and e.response is not None \
+                            and 400 <= e.response.status_code < 500:
+                        raise
+                    if attempt >= self.DOWNLOAD_RETRIES:
+                        raise
+                    print(f"LoRA download attempt {attempt} failed: {e}")
+                    time.sleep(2 * attempt)
         finally:
             self._remove_quietly(tmp_path)
+
+    def _probe(self, url):
+        """Probe the URL with a 1-byte range request.
+
+        Returns (total_size, supports_ranges, validator). A 206 answer proves
+        the server honors Range and reports the total size via Content-Range;
+        a 200 means no range support, with Content-Length as the size (0 if
+        unknown). The validator (strong ETag, else Last-Modified) is sent back
+        as If-Range on all later ranged requests, which makes the server serve
+        the full file instead of a range if the content changed in between.
+        """
+        headers = {'Range': 'bytes=0-0', 'Accept-Encoding': 'identity'}
+        with requests.get(url, headers=headers, stream=True, timeout=self.DOWNLOAD_TIMEOUT) as response:
+            if response.status_code != 206:
+                if response.status_code == 416:
+                    # Server rejects range probes outright; treat as unsupported
+                    return 0, False, None
+                response.raise_for_status()
+                return int(response.headers.get('content-length', 0) or 0), False, None
+            etag = response.headers.get('etag', '')
+            validator = etag if etag and not etag.startswith('W/') \
+                else response.headers.get('last-modified')
+            total = response.headers.get('content-range', '').rsplit('/', 1)[-1]
+            return (int(total) if total.isdigit() else 0), True, validator
+
+    def _download_single(self, url, tmp_path, total_size, resume, validator):
+        """Stream the whole file over one connection. With resume=True and a
+        partial single-stream download already at tmp_path, continue it with a
+        Range request instead of starting over."""
+        pos = 0
+        if resume:
+            try:
+                pos = os.path.getsize(tmp_path)
+            except OSError:
+                pos = 0
+            if not 0 < pos < total_size:
+                pos = 0
+        headers = {'Accept-Encoding': 'identity'}
+        if pos:
+            headers['Range'] = f'bytes={pos}-'
+            if validator:
+                headers['If-Range'] = validator
+            print(f"Resuming download from byte {pos} of {total_size}")
+        with requests.get(url, stream=True, timeout=self.DOWNLOAD_TIMEOUT, headers=headers) as response:
+            response.raise_for_status()
+            if pos:
+                if response.status_code != 206:
+                    # Server ignored the range (or the file changed under
+                    # If-Range): the response is the full file, rewrite it
+                    pos = 0
+                else:
+                    content_range = response.headers.get('content-range', '')
+                    if not content_range.startswith(f'bytes {pos}-'):
+                        raise IOError(f"server answered resume from byte {pos} with "
+                                      f"mismatched Content-Range '{content_range}'")
+            if not pos:
+                size = total_size or int(response.headers.get('content-length', 0) or 0)
+                print(f"File size: {size / (1024 * 1024):.2f} MB" if size else "File size: unknown")
+            with open(tmp_path, 'ab' if pos else 'wb') as f:
+                for chunk in response.iter_content(chunk_size=self.DOWNLOAD_CHUNK_SIZE):
+                    f.write(chunk)
+
+    def _download_segmented(self, url, tmp_path, total_size, validator):
+        """Download the file with several parallel range requests writing into
+        a preallocated temp file. Success requires every segment to have
+        written exactly its byte range, so no region can be left holding the
+        preallocated zero-fill."""
+        seg_size = (total_size + self.DOWNLOAD_CONNECTIONS - 1) // self.DOWNLOAD_CONNECTIONS
+        segments = [(start, min(start + seg_size, total_size) - 1)
+                    for start in range(0, total_size, seg_size)]
+        print(f"File size: {total_size / (1024 * 1024):.2f} MB, "
+              f"downloading with {len(segments)} connections")
+        # Preallocate so each worker can write at its own offset
+        with open(tmp_path, 'wb') as f:
+            f.truncate(total_size)
+        with ThreadPoolExecutor(max_workers=len(segments)) as pool:
+            futures = [pool.submit(self._download_segment, url, tmp_path, start, end, validator)
+                       for start, end in segments]
+            errors = [f.exception() for f in futures]
+        errors = [e for e in errors if e is not None]
+        if errors:
+            # A refused range must win so the caller can fall back safely
+            for e in errors:
+                if isinstance(e, _RangeNotSupported):
+                    raise e
+            raise errors[0]
+
+    def _download_segment(self, url, tmp_path, start, end, validator):
+        """Download bytes start..end (inclusive) to their final offsets in
+        tmp_path, retrying and resuming from the last byte received. Each
+        worker uses its own file handle, so no shared state is involved."""
+        seg_len = end - start + 1
+        written = 0
+        last_error = None
+        for attempt in range(1, self.DOWNLOAD_RETRIES + 1):
+            try:
+                headers = {'Range': f'bytes={start + written}-{end}',
+                           'Accept-Encoding': 'identity'}
+                if validator:
+                    headers['If-Range'] = validator
+                with requests.get(url, stream=True, timeout=self.DOWNLOAD_TIMEOUT,
+                                  headers=headers) as response:
+                    response.raise_for_status()
+                    if response.status_code != 206:
+                        raise _RangeNotSupported(
+                            f"got HTTP {response.status_code} instead of 206 for a range request")
+                    content_range = response.headers.get('content-range', '')
+                    if not content_range.startswith(f'bytes {start + written}-{end}/'):
+                        raise _RangeNotSupported(
+                            f"mismatched Content-Range '{content_range}' for "
+                            f"requested bytes {start + written}-{end}")
+                    with open(tmp_path, 'r+b') as f:
+                        f.seek(start + written)
+                        for chunk in response.iter_content(chunk_size=self.DOWNLOAD_CHUNK_SIZE):
+                            if written + len(chunk) > seg_len:
+                                raise IOError(f"server sent more data than requested "
+                                              f"for bytes {start}-{end}")
+                            f.write(chunk)
+                            written += len(chunk)
+                if written == seg_len:
+                    return
+                raise IOError(f"segment {start}-{end} incomplete: "
+                              f"got {written} of {seg_len} bytes")
+            except _RangeNotSupported:
+                raise
+            except requests.HTTPError as e:
+                if e.response is not None and 400 <= e.response.status_code < 500:
+                    raise
+                last_error = e
+            except Exception as e:
+                last_error = e
+            if attempt < self.DOWNLOAD_RETRIES:
+                time.sleep(2 * attempt)
+        raise IOError(f"segment {start}-{end} failed after "
+                      f"{self.DOWNLOAD_RETRIES} attempts: {last_error}")
 
     @staticmethod
     def _check_safetensors(path):
